@@ -7,7 +7,7 @@ import os
 from datetime import datetime
 from config.database import get_db_manager
 from core import create_mapping_engine
-from api.routes import create_success_response, create_error_response
+from .helpers import create_success_response, create_error_response
 
 # ブループリント作成
 health_bp = Blueprint('health', __name__)

@@ -8,7 +8,7 @@ import json
 from core import create_mapping_engine
 from config.settings import Config
 from utils.logger import analysis_logger, performance_logger
-from api.routes import create_success_response, create_error_response
+from .helpers import create_success_response, create_error_response
 
 # ブループリント作成
 analysis_bp = Blueprint('analysis', __name__)

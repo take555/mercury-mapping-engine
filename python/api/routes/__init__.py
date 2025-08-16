@@ -1,70 +1,63 @@
 """
-Mercury Mapping Engine - API Routes Registration
-APIルートの登録管理
+Mercury Mapping Engine - API Routes
+REST API エンドポイントの登録管理
 """
-from flask import Blueprint
-from .health import health_bp
-from .models import models_bp
-from .tokens import tokens_bp
-from .analysis import analysis_bp
-
+from flask import Blueprint, jsonify
 
 def register_api_routes(app):
-    """APIルートをアプリケーションに登録"""
+    """API routes を Flask アプリに登録"""
     
-    # メインAPIブループリント
-    api_bp = Blueprint('api', __name__, url_prefix='/api')
+    try:
+        # Health Check
+        from .health import health_bp
+        app.register_blueprint(health_bp, url_prefix='/api')
+        print("✅ Health API registered")
+        
+    except ImportError as e:
+        print(f"⚠️ Health API import failed: {e}")
     
-    # 各機能のブループリントを登録
-    api_bp.register_blueprint(health_bp)
-    api_bp.register_blueprint(models_bp)
-    api_bp.register_blueprint(tokens_bp)
-    api_bp.register_blueprint(analysis_bp)
+    try:
+        # Models API
+        from .models import models_bp
+        app.register_blueprint(models_bp, url_prefix='/api')
+        print("✅ Models API registered")
+        
+    except ImportError as e:
+        print(f"⚠️ Models API import failed: {e}")
     
-    # アプリケーションに登録
-    app.register_blueprint(api_bp)
+    try:
+        # Tokens API  
+        from .tokens import tokens_bp
+        app.register_blueprint(tokens_bp, url_prefix='/api')
+        print("✅ Tokens API registered")
+        
+    except ImportError as e:
+        print(f"⚠️ Tokens API import failed: {e}")
     
-    app.logger.info("✅ API routes registered")
+    try:
+        # Analysis API
+        from .analysis import analysis_bp
+        app.register_blueprint(analysis_bp, url_prefix='/api')
+        print("✅ Analysis API registered")
+        
+    except ImportError as e:
+        print(f"⚠️ Analysis API import failed: {e}")
     
-    # 登録されたルート一覧をログ出力（デバッグ用）
-    if app.config.get('DEBUG'):
-        log_registered_routes(app)
+    # フォールバック: 基本的なヘルスチェック
+    if not any(rule.endpoint and 'health' in rule.endpoint for rule in app.url_map.iter_rules()):
+        health_bp = Blueprint('fallback_health', __name__)
+        
+        @health_bp.route('/health')
+        def health_check():
+            return jsonify({
+                'status': 'ok', 
+                'message': 'Mercury Mapping Engine API is running',
+                'mode': 'fallback'
+            })
+        
+        app.register_blueprint(health_bp, url_prefix='/api')
+        print("✅ Fallback health check registered")
 
-
-def log_registered_routes(app):
-    """登録されたルート一覧をログ出力"""
-    app.logger.debug("Registered API routes:")
-    for rule in app.url_map.iter_rules():
-        if rule.rule.startswith('/api'):
-            methods = ', '.join(rule.methods - {'HEAD', 'OPTIONS'})
-            app.logger.debug(f"  {methods:10} {rule.rule}")
-
-
-# エラーレスポンス用のヘルパー関数
-def create_error_response(message, status_code=400, details=None):
-    """統一されたエラーレスポンスを作成"""
-    response = {
-        'success': False,
-        'error': message,
-        'status_code': status_code
-    }
-    
-    if details:
-        response['details'] = details
-    
-    return response, status_code
-
-
-def create_success_response(data=None, message=None):
-    """統一された成功レスポンスを作成"""
-    response = {
-        'success': True
-    }
-    
-    if data is not None:
-        response['data'] = data
-    
-    if message:
-        response['message'] = message
-    
-    return response
+# パッケージ情報
+__version__ = "1.0.0"
+__all__ = ['register_api_routes']

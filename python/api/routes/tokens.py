@@ -5,7 +5,7 @@ Mercury Mapping Engine - Tokens API Routes
 from flask import Blueprint, request, current_app
 import os
 import requests
-from api.routes import create_success_response, create_error_response
+from .helpers import create_success_response, create_error_response
 
 # ブループリント作成
 tokens_bp = Blueprint('tokens', __name__)
