@@ -1,0 +1,62 @@
+# Mercury Mapping Engine - Python Dependencies
+
+# Core Framework
+Flask==2.3.3
+Flask-CORS==4.0.0
+
+# Database
+PyMySQL==1.1.0
+SQLAlchemy==2.0.21
+
+# Data Processing
+pandas==2.1.1
+numpy==1.24.3
+openpyxl==3.1.2
+
+# Text Processing & Similarity
+fuzzywuzzy==0.18.0
+python-Levenshtein==0.21.1
+jellyfish==0.11.2
+
+# HTTP Requests
+requests==2.31.0
+urllib3==2.0.5
+
+# AI/ML
+anthropic==0.3.11
+
+# Configuration & Environment
+python-dotenv==1.0.0
+
+# Logging & Monitoring
+colorlog==6.7.0
+
+# Development & Testing
+pytest==7.4.2
+pytest-flask==1.2.0
+pytest-cov==4.1.0
+
+# Code Quality
+flake8==6.1.0
+black==23.9.1
+
+# Documentation
+Sphinx==7.2.6
+
+# Utilities
+click==8.1.7
+python-dateutil==2.8.2
+pytz==2023.3
+
+# File Processing
+chardet==5.2.0
+
+# JSON & Data Serialization
+jsonschema==4.19.1
+
+# Production Server
+gunicorn==21.2.0
+
+# Optional: Performance
+# numba==0.57.1
+# cython==3.0.2

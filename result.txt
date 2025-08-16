@@ -1,0 +1,107 @@
+{
+  "analysis": {
+    "company_a": {
+      "data_types": {
+        "\u30ab\u30fc\u30c9\u540d": "text",
+        "\u30b7\u30ea\u30fc\u30ba": "text",
+        "\u30ec\u30a2\u30ea\u30c6\u30a3": "text",
+        "\u4fa1\u683c": "numeric"
+      },
+      "headers": [
+        "\u30ab\u30fc\u30c9\u540d",
+        "\u30ec\u30a2\u30ea\u30c6\u30a3",
+        "\u30b7\u30ea\u30fc\u30ba",
+        "\u4fa1\u683c"
+      ],
+      "sample_data": [
+        {
+          "\u30ab\u30fc\u30c9\u540d": "\u30d5\u30a1\u30a4\u30e4\u30fc\u30c9\u30e9\u30b4\u30f3 R",
+          "\u30b7\u30ea\u30fc\u30ba": "\u7b2c1\u5f3e",
+          "\u30ec\u30a2\u30ea\u30c6\u30a3": "\u30ec\u30a2",
+          "\u4fa1\u683c": "150"
+        },
+        {
+          "\u30ab\u30fc\u30c9\u540d": "\u30a2\u30a4\u30b9\u30a6\u30a3\u30b6\u30fc\u30c9 N",
+          "\u30b7\u30ea\u30fc\u30ba": "\u7b2c1\u5f3e",
+          "\u30ec\u30a2\u30ea\u30c6\u30a3": "\u30ce\u30fc\u30de\u30eb",
+          "\u4fa1\u683c": "50"
+        }
+      ],
+      "statistics": {
+        "data_quality": {
+          "empty_rate": 0.0,
+          "issues": [],
+          "score": 100
+        },
+        "empty_rows": 0,
+        "total_columns": 4,
+        "total_rows": 2
+      }
+    },
+    "company_b": {
+      "data_types": {
+        "\u30bb\u30c3\u30c8": "text",
+        "\u5024\u6bb5": "numeric",
+        "\u540d\u79f0": "text",
+        "\u5e0c\u5c11\u5ea6": "text"
+      },
+      "headers": [
+        "\u540d\u79f0",
+        "\u5e0c\u5c11\u5ea6",
+        "\u30bb\u30c3\u30c8",
+        "\u5024\u6bb5"
+      ],
+      "sample_data": [
+        {
+          "\u30bb\u30c3\u30c8": "SET001",
+          "\u5024\u6bb5": "150",
+          "\u540d\u79f0": "\u30d5\u30a1\u30a4\u30e4\u30fc\u30c9\u30e9\u30b4\u30f3",
+          "\u5e0c\u5c11\u5ea6": "R"
+        },
+        {
+          "\u30bb\u30c3\u30c8": "SET001",
+          "\u5024\u6bb5": "50",
+          "\u540d\u79f0": "\u30a2\u30a4\u30b9\u30fb\u30a6\u30a3\u30b6\u30fc\u30c9",
+          "\u5e0c\u5c11\u5ea6": "N"
+        }
+      ],
+      "statistics": {
+        "data_quality": {
+          "empty_rate": 0.0,
+          "issues": [],
+          "score": 100
+        },
+        "empty_rows": 0,
+        "total_columns": 4,
+        "total_rows": 2
+      }
+    },
+    "suggested_mapping": [
+      {
+        "company_a_field": "\u30ab\u30fc\u30c9\u540d",
+        "company_b_field": "\u540d\u79f0",
+        "confidence": 0.5,
+        "field_type": "name"
+      },
+      {
+        "company_a_field": "\u30ec\u30a2\u30ea\u30c6\u30a3",
+        "company_b_field": "\u5e0c\u5c11\u5ea6",
+        "confidence": 0.4,
+        "field_type": "rarity"
+      },
+      {
+        "company_a_field": "\u4fa1\u683c",
+        "company_b_field": "\u5024\u6bb5",
+        "confidence": 0.3333333333333333,
+        "field_type": "price"
+      },
+      {
+        "company_a_field": "\u30b7\u30ea\u30fc\u30ba",
+        "company_b_field": "\u30bb\u30c3\u30c8",
+        "confidence": 0.4,
+        "field_type": "series"
+      }
+    ]
+  },
+  "success": true
+}

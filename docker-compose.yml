@@ -1,0 +1,45 @@
+services:
+  mysql:
+    user: "501:20"
+    image: mysql:8.0
+    platform: linux/amd64  # M1 Mac対応
+    container_name: mercury-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: mercury
+      MYSQL_USER: mercury
+      MYSQL_PASSWORD: mercurypass
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./mysql-data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: --default-authentication-plugin=mysql_native_password
+
+  python:
+    build: ./python
+    container_name: mercury-python
+    environment:
+      - MYSQL_HOST=mysql
+      - MYSQL_USER=mercury
+      - MYSQL_PASSWORD=mercurypass
+      - MYSQL_DATABASE=mercury
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./python:/app
+      - ./uploads:/app/uploads
+      - ./results:/app/results
+      - ./logs:/app/logs
+    depends_on:
+      - mysql
+    command: python app.py
+
+  adminer:
+    image: adminer
+    container_name: mercury-adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mysql
