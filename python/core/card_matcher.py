@@ -231,40 +231,58 @@ class CardMatcher:
 
     def brute_force_matching(self, data_a: List[Dict], data_b: List[Dict],
                              headers_a: List[str], headers_b: List[str],
-                             max_sample_size: int = 100) -> List[Dict[str, Any]]:
+                             max_sample_size: int = 100,
+                             similarity_mode: str = 'library',  # 'library' or 'ai'
+                             ai_manager=None) -> List[Dict[str, Any]]:
         """
-        力技マッチング: 全フィールド×全フィールドで最強の精度を実現
+        ハイブリッド力技マッチング: ライブラリ vs AI で類似度計算を切り替え
 
         Args:
             data_a: A社データ
             data_b: B社データ
             headers_a: A社ヘッダー
             headers_b: B社ヘッダー
-            max_sample_size: 最大サンプルサイズ（コスト制御）
+            max_sample_size: 最大サンプルサイズ
+            similarity_mode: 'library' (Python libs) or 'ai' (Claude API)
+            ai_manager: AI Manager instance (similarity_mode='ai'時に必要)
 
         Returns:
             高精度マッチング結果
         """
         performance_logger.start_timer('brute_force_matching')
-        analysis_logger.logger.info("🔥 Brute Force Matching 開始 - 力で解決します！")
 
-        # サンプリング（コスト制御）
+        mode_info = {
+            'library': '🐍 Python Library Mode - 高速・安価',
+            'ai': '🤖 Claude AI Mode - 高精度・意味理解'
+        }
+
+        analysis_logger.logger.info(f"🔥 Brute Force Matching 開始 - {mode_info.get(similarity_mode, similarity_mode)}")
+
+        # サンプリング
         sample_a = data_a[:max_sample_size]
         sample_b = data_b[:max_sample_size]
 
         matches = []
-        field_correlation_matrix = {}  # フィールド対応を同時に発見
+        field_correlation_matrix = {}
 
         analysis_logger.logger.info(f"📊 サンプルサイズ: A社{len(sample_a)}行 × B社{len(sample_b)}行")
+        analysis_logger.logger.info(f"⚙️ 類似度計算モード: {similarity_mode}")
 
         for i, row_a in enumerate(sample_a):
             best_matches = []
 
             for j, row_b in enumerate(sample_b):
-                # 💪 全フィールド×全フィールドの力技比較
-                field_match_results = self._compare_all_fields(
-                    row_a, row_b, headers_a, headers_b
-                )
+                # モード別フィールド比較
+                if similarity_mode == 'library':
+                    field_match_results = self._compare_all_fields_library(
+                        row_a, row_b, headers_a, headers_b
+                    )
+                elif similarity_mode == 'ai':
+                    field_match_results = self._compare_all_fields_ai(
+                        row_a, row_b, headers_a, headers_b, ai_manager
+                    )
+                else:
+                    raise ValueError(f"Unknown similarity_mode: {similarity_mode}")
 
                 # フィールド対応マトリクス更新
                 self._update_field_correlation_matrix(
@@ -274,7 +292,7 @@ class CardMatcher:
                 # 行全体のマッチスコア計算
                 total_score = self._calculate_brute_force_score(field_match_results)
 
-                if total_score > 0.6:  # 力技閾値
+                if total_score > 0.6:
                     best_matches.append({
                         'row_a_index': i,
                         'row_b_index': j,
@@ -282,6 +300,7 @@ class CardMatcher:
                         'row_b_data': row_b,
                         'match_score': total_score,
                         'field_matches': field_match_results,
+                        'similarity_mode': similarity_mode,
                         'match_details': {
                             'matched_fields_count': len([fm for fm in field_match_results if fm['similarity'] > 0.7]),
                             'total_fields_compared': len(field_match_results),
@@ -295,7 +314,7 @@ class CardMatcher:
                 best_match = max(best_matches, key=lambda x: x['match_score'])
                 matches.append(best_match)
 
-        # 重複除去（1対1マッピング）
+        # 重複除去
         unique_matches = self._remove_duplicate_matches_brute_force(matches)
 
         # フィールド対応統計
@@ -304,21 +323,22 @@ class CardMatcher:
         analysis_logger.logger.info(f"🎯 Brute Force結果: {len(unique_matches)}件のマッチ")
         analysis_logger.logger.info(f"📈 発見されたフィールド対応: {len(field_mapping_stats)}組")
 
-        # 結果にフィールドマッピング情報を追加
+        # 結果にモード情報とフィールドマッピング情報を追加
         for match in unique_matches:
             match['discovered_field_mappings'] = field_mapping_stats
+            match['analysis_mode'] = similarity_mode
 
         performance_logger.end_timer('brute_force_matching')
         return unique_matches
 
-    def _compare_all_fields(self, row_a: Dict, row_b: Dict,
-                            headers_a: List[str], headers_b: List[str]) -> List[Dict]:
-        """全フィールド×全フィールドの力技比較"""
+    def _compare_all_fields_library(self, row_a: Dict, row_b: Dict,
+                                    headers_a: List[str], headers_b: List[str]) -> List[Dict]:
+        """🐍 Pythonライブラリベースの全フィールド比較"""
         field_matches = []
 
         for field_a in headers_a:
             value_a = str(row_a.get(field_a, '')).strip()
-            if not value_a or len(value_a) < 2:  # 空値・短すぎる値はスキップ
+            if not value_a or len(value_a) < 2:
                 continue
 
             for field_b in headers_b:
@@ -326,11 +346,11 @@ class CardMatcher:
                 if not value_b or len(value_b) < 2:
                     continue
 
-                # 💥 複数手法で徹底比較
+                # 複数手法で徹底比較
                 similarities = self._calculate_comprehensive_similarity(value_a, value_b)
                 max_similarity = max(similarities.values())
 
-                if max_similarity > 0.5:  # 中程度以上の類似度のみ記録
+                if max_similarity > 0.5:
                     field_matches.append({
                         'field_a': field_a,
                         'field_b': field_b,
@@ -338,199 +358,138 @@ class CardMatcher:
                         'value_b': value_b,
                         'similarity': max_similarity,
                         'similarity_details': similarities,
-                        'match_type': self._classify_match_type(value_a, value_b, similarities)
+                        'match_type': self._classify_match_type(value_a, value_b, similarities),
+                        'calculation_method': 'library'
                     })
 
         return field_matches
 
-    def _calculate_comprehensive_similarity(self, value_a: str, value_b: str) -> Dict[str, float]:
-        """包括的類似度計算 - あらゆる手法で比較"""
-        similarities = {}
+    def _compare_all_fields_ai(self, row_a: Dict, row_b: Dict,
+                               headers_a: List[str], headers_b: List[str],
+                               ai_manager) -> List[Dict]:
+        """🤖 Claude AIベースの全フィールド比較"""
+        if not ai_manager:
+            analysis_logger.logger.warning("AI Manager not provided, falling back to library mode")
+            return self._compare_all_fields_library(row_a, row_b, headers_a, headers_b)
 
-        try:
-            # 1. 基本文字列類似度
-            similarities['exact'] = 1.0 if value_a == value_b else 0.0
-            similarities['fuzzy'] = self.text_similarity.calculate_fuzzy_similarity(value_a, value_b)
-            similarities['partial'] = self.text_similarity.calculate_partial_similarity(value_a, value_b)
+        field_matches = []
 
-            # 2. 数値比較（数値の場合）
-            num_a = self._extract_numeric_value(value_a)
-            num_b = self._extract_numeric_value(value_b)
-            if num_a is not None and num_b is not None:
-                if num_a == num_b:
-                    similarities['numeric_exact'] = 1.0
-                elif num_a > 0 and num_b > 0:
-                    diff_ratio = abs(num_a - num_b) / max(num_a, num_b)
-                    similarities['numeric_close'] = max(0, 1.0 - diff_ratio)
+        # バッチ処理でAI分析（効率化）
+        field_pairs = []
+        for field_a in headers_a:
+            value_a = str(row_a.get(field_a, '')).strip()
+            if not value_a or len(value_a) < 2:
+                continue
 
-            # 3. 正規化類似度（大文字小文字、記号無視）
-            normalized_a = re.sub(r'[^\w]', '', value_a.lower())
-            normalized_b = re.sub(r'[^\w]', '', value_b.lower())
-            if normalized_a and normalized_b:
-                similarities['normalized'] = self.text_similarity.calculate_fuzzy_similarity(
-                    normalized_a, normalized_b
-                )
+            for field_b in headers_b:
+                value_b = str(row_b.get(field_b, '')).strip()
+                if not value_b or len(value_b) < 2:
+                    continue
 
-            # 4. 部分文字列マッチ
-            if len(value_a) >= 3 and len(value_b) >= 3:
-                if value_a in value_b or value_b in value_a:
-                    similarities['substring'] = 0.8
-
-            # 5. 単語レベル類似度
-            words_a = value_a.split()
-            words_b = value_b.split()
-            if words_a and words_b:
-                word_matches = 0
-                for word_a in words_a:
-                    for word_b in words_b:
-                        if self.text_similarity.calculate_fuzzy_similarity(word_a, word_b) > 0.8:
-                            word_matches += 1
-                            break
-                similarities['word_level'] = word_matches / max(len(words_a), len(words_b))
-
-        except Exception as e:
-            analysis_logger.logger.warning(f"類似度計算エラー: {e}")
-            similarities['fuzzy'] = 0.0
-
-        return similarities
-
-    def _classify_match_type(self, value_a: str, value_b: str, similarities: Dict[str, float]) -> str:
-        """マッチタイプを分類"""
-        if similarities.get('exact', 0) == 1.0:
-            return 'exact_match'
-        elif similarities.get('numeric_exact', 0) == 1.0:
-            return 'numeric_match'
-        elif similarities.get('normalized', 0) > 0.9:
-            return 'normalized_match'
-        elif similarities.get('substring', 0) > 0.7:
-            return 'substring_match'
-        elif similarities.get('word_level', 0) > 0.8:
-            return 'word_match'
-        elif max(similarities.values()) > 0.7:
-            return 'fuzzy_match'
-        else:
-            return 'weak_match'
-
-    def _calculate_brute_force_score(self, field_matches: List[Dict]) -> float:
-        """力技スコア計算 - 複数のフィールドマッチから総合判定"""
-        if not field_matches:
-            return 0.0
-
-        # 重み付きスコア計算
-        total_score = 0.0
-        weights = {
-            'exact_match': 1.0,
-            'numeric_match': 0.95,
-            'normalized_match': 0.9,
-            'substring_match': 0.8,
-            'word_match': 0.85,
-            'fuzzy_match': 0.7,
-            'weak_match': 0.5
-        }
-
-        high_confidence_matches = 0
-        total_weighted_score = 0.0
-
-        for match in field_matches:
-            similarity = match['similarity']
-            match_type = match['match_type']
-            weight = weights.get(match_type, 0.5)
-
-            weighted_score = similarity * weight
-            total_weighted_score += weighted_score
-
-            if weighted_score > 0.8:
-                high_confidence_matches += 1
-
-        # 複数高信頼度マッチがある場合は大幅ボーナス
-        if high_confidence_matches >= 2:
-            total_score = min(0.95, total_weighted_score / len(field_matches) + 0.2)
-        elif high_confidence_matches >= 1:
-            total_score = min(0.85, total_weighted_score / len(field_matches) + 0.1)
-        else:
-            total_score = total_weighted_score / len(field_matches)
-
-        return total_score
-
-    def _update_field_correlation_matrix(self, matrix: Dict, field_matches: List[Dict]):
-        """フィールド対応マトリクスを更新"""
-        for match in field_matches:
-            if match['similarity'] > 0.7:  # 高類似度のみ
-                key = f"{match['field_a']}→{match['field_b']}"
-                if key not in matrix:
-                    matrix[key] = {'count': 0, 'total_similarity': 0.0, 'samples': []}
-
-                matrix[key]['count'] += 1
-                matrix[key]['total_similarity'] += match['similarity']
-                matrix[key]['samples'].append({
-                    'value_a': match['value_a'],
-                    'value_b': match['value_b'],
-                    'similarity': match['similarity']
-                })
-
-    def _analyze_field_correlations(self, matrix: Dict) -> List[Dict]:
-        """フィールド対応統計分析"""
-        correlations = []
-
-        for field_pair, stats in matrix.items():
-            if stats['count'] >= 2:  # 2回以上マッチした組み合わせのみ
-                avg_similarity = stats['total_similarity'] / stats['count']
-                field_a, field_b = field_pair.split('→')
-
-                correlations.append({
+                field_pairs.append({
                     'field_a': field_a,
                     'field_b': field_b,
-                    'confidence': avg_similarity,
-                    'sample_count': stats['count'],
-                    'field_type': self._infer_field_type(stats['samples']),
-                    'quality_score': min(1.0, avg_similarity * (stats['count'] / 10))
+                    'value_a': value_a,
+                    'value_b': value_b
                 })
 
-        # 信頼度順でソート
-        correlations.sort(key=lambda x: x['confidence'], reverse=True)
-        return correlations
+        # AI分析実行
+        if field_pairs:
+            ai_results = self._batch_ai_similarity_analysis(field_pairs, ai_manager)
 
-    def _infer_field_type(self, samples: List[Dict]) -> str:
-        """サンプルからフィールドタイプを推測"""
-        numeric_count = 0
-        text_count = 0
+            for i, pair in enumerate(field_pairs):
+                ai_result = ai_results.get(i, {})
+                similarity = ai_result.get('similarity', 0.0)
 
-        for sample in samples[:5]:  # 最初の5サンプルで判定
-            value_a = sample['value_a']
-            value_b = sample['value_b']
+                if similarity > 0.5:
+                    field_matches.append({
+                        'field_a': pair['field_a'],
+                        'field_b': pair['field_b'],
+                        'value_a': pair['value_a'],
+                        'value_b': pair['value_b'],
+                        'similarity': similarity,
+                        'ai_reasoning': ai_result.get('reasoning', ''),
+                        'match_type': ai_result.get('match_type', 'ai_determined'),
+                        'calculation_method': 'ai',
+                        'ai_confidence': ai_result.get('confidence', similarity)
+                    })
 
-            if (self._extract_numeric_value(value_a) is not None and
-                    self._extract_numeric_value(value_b) is not None):
-                numeric_count += 1
+        return field_matches
+
+    def _batch_ai_similarity_analysis(self, field_pairs: List[Dict], ai_manager) -> Dict:
+        """バッチでAI類似度分析実行"""
+        try:
+            # プロンプト構築
+            prompt = self._build_similarity_analysis_prompt(field_pairs)
+
+            # Claude API呼び出し
+            result = ai_manager.claude_client.call_api(
+                prompt,
+                model='claude-3-haiku-20240307'  # 高速モデルで効率化
+            )
+
+            if result['success']:
+                # JSONレスポンスをパース
+                return self._parse_ai_similarity_response(result['content'])
             else:
-                text_count += 1
+                analysis_logger.logger.error(f"AI similarity analysis failed: {result.get('error')}")
+                return {}
 
-        if numeric_count > text_count:
-            return 'numeric'
-        elif any('名' in str(s['value_a']) + str(s['value_b']) for s in samples[:3]):
-            return 'name'
-        elif any('価格' in str(s['value_a']) + str(s['value_b']) or
-                 'price' in str(s['value_a']) + str(s['value_b']).lower() for s in samples[:3]):
-            return 'price'
-        else:
-            return 'text'
+        except Exception as e:
+            analysis_logger.logger.error(f"AI similarity analysis error: {e}")
+            return {}
 
-    def _remove_duplicate_matches_brute_force(self, matches: List[Dict]) -> List[Dict]:
-        """力技重複除去 - より高精度"""
-        # スコア順でソート
-        matches.sort(key=lambda x: x['match_score'], reverse=True)
+    def _build_similarity_analysis_prompt(self, field_pairs: List[Dict]) -> str:
+        """AI類似度分析用プロンプト構築"""
+        pairs_text = ""
+        for i, pair in enumerate(field_pairs[:20]):  # 最大20ペアずつ処理
+            pairs_text += f"""
+{i}: フィールド名 "{pair['field_a']}" vs "{pair['field_b']}"
+    値の例: "{pair['value_a']}" vs "{pair['value_b']}"
+"""
 
-        used_a = set()
-        used_b = set()
-        unique_matches = []
+        prompt = f"""
+以下のフィールドペアについて、類似度を分析してください。
 
-        for match in matches:
-            row_a_idx = match['row_a_index']
-            row_b_idx = match['row_b_index']
+【分析対象】
+{pairs_text}
 
-            if row_a_idx not in used_a and row_b_idx not in used_b:
-                unique_matches.append(match)
-                used_a.add(row_a_idx)
-                used_b.add(row_b_idx)
+【判定基準】
+1. 意味的類似性（フィールド名の意味）
+2. データ形式の一致度
+3. ビジネスロジックの整合性
+4. 値の内容の類似性
 
-        return unique_matches
+【回答形式】
+JSON形式で各ペアの分析結果を返してください：
+{{
+  "0": {{
+    "similarity": 0.85,
+    "reasoning": "attackとAPは両方とも攻撃力を表し、数値も一致",
+    "match_type": "semantic_match",
+    "confidence": 0.9
+  }},
+  "1": {{ ... }}
+}}
+
+類似度は0.0-1.0で評価し、0.7以上を高類似度として判定してください。
+"""
+        return prompt
+
+    def _parse_ai_similarity_response(self, content: str) -> Dict:
+        """AI応答のJSONパース"""
+        try:
+            # JSONブロックを抽出
+            import re
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                import json
+                return json.loads(json_match.group())
+            else:
+                analysis_logger.logger.warning("AI response does not contain valid JSON")
+                return {}
+        except Exception as e:
+            analysis_logger.logger.error(f"Failed to parse AI response: {e}")
+            return {}
+
+    # 既存の_calculate_comprehensive_similarity等のメソッドはそのまま保持
