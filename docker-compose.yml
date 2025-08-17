@@ -4,6 +4,10 @@ services:
     image: mysql:8.0
     platform: linux/amd64  # M1 Mac対応
     container_name: mercury-mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: mercury
@@ -34,6 +38,7 @@ services:
       - ./logs:/app/logs
     depends_on:
       - mysql
+    restart: on-failure
     command: python app.py
 
   adminer:

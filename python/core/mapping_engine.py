@@ -105,9 +105,10 @@ class MappingEngine:
         """マッピング分析のサマリーを作成"""
         
         # 品質メトリクス
-        high_confidence_mappings = [m for m in enhanced_mappings if m['confidence'] > 0.8]
-        medium_confidence_mappings = [m for m in enhanced_mappings if 0.6 <= m['confidence'] <= 0.8]
-        
+        high_confidence_mappings = [m for m in enhanced_mappings if m.get('confidence', 0.0) > 0.8]
+        medium_confidence_mappings = [m for m in enhanced_mappings if 0.6 < m.get('confidence', 0.0) <= 0.8]
+        low_confidence_mappings = [m for m in enhanced_mappings if m.get('confidence', 0.0) <= 0.6]
+         
         # カードマッチングの品質分析
         match_quality = self.card_matcher.analyze_match_quality(card_matches)
         
@@ -132,9 +133,9 @@ class MappingEngine:
                 'high_confidence_count': len(high_confidence_mappings),
                 'medium_confidence_count': len(medium_confidence_mappings),
                 'low_confidence_count': len(enhanced_mappings) - len(high_confidence_mappings) - len(medium_confidence_mappings),
-                'average_confidence': sum(m['confidence'] for m in enhanced_mappings) / len(enhanced_mappings) if enhanced_mappings else 0,
-                'coverage_ratio_a': len(set(m['company_a_field'] for m in enhanced_mappings)) / len(analysis_a['headers']),
-                'coverage_ratio_b': len(set(m['company_b_field'] for m in enhanced_mappings)) / len(analysis_b['headers'])
+                'average_confidence': sum(m.get('confidence', 0.0) for m in enhanced_mappings) / len(enhanced_mappings) if enhanced_mappings else 0,
+                'coverage_ratio_a': len(set(m.get('company_a_field', '') for m in enhanced_mappings if m.get('company_a_field'))) / len(analysis_a['headers']),
+                'coverage_ratio_b': len(set(m.get('company_b_field', '') for m in enhanced_mappings if m.get('company_b_field'))) / len(analysis_b['headers'])
             },
             'card_matching_quality': match_quality,
             'field_type_distribution': {
@@ -160,8 +161,8 @@ class MappingEngine:
                 'engine_version': 'Mercury Mapping Engine v2.0',
                 'analysis_method': 'card_based_matching',
                 'quality_metrics': {
-                    'average_confidence': sum(r['confidence'] for r in rules) / len(rules) if rules else 0,
-                    'high_quality_rules': len([r for r in rules if r['confidence'] > 0.9])
+                    'average_confidence': sum(r.get('confidence', 0.0) for r in rules) / len(rules) if rules else 0,
+                    'high_quality_rules': len([r for r in rules if r.get('confidence', 0.0) > 0.9])
                 }
             }
         }
@@ -188,8 +189,8 @@ class MappingEngine:
             validation_result['warnings'].append("カードマッチが見つかりません")
         
         # 重複チェック
-        a_fields = [m['company_a_field'] for m in enhanced_mappings]
-        b_fields = [m['company_b_field'] for m in enhanced_mappings]
+        a_fields = [m.get('company_a_field', '') for m in enhanced_mappings]
+        b_fields = [m.get('company_b_field', '') for m in enhanced_mappings]
         
         duplicate_a = [f for f in set(a_fields) if a_fields.count(f) > 1]
         duplicate_b = [f for f in set(b_fields) if b_fields.count(f) > 1]
@@ -201,7 +202,7 @@ class MappingEngine:
             validation_result['warnings'].append(f"B社フィールドの重複: {duplicate_b}")
         
         # 信頼度の分布チェック
-        confidences = [m['confidence'] for m in enhanced_mappings]
+        confidences = [m.get('confidence', 0.0) for m in enhanced_mappings]
         low_confidence_count = len([c for c in confidences if c < 0.5])
         
         if low_confidence_count > len(enhanced_mappings) * 0.5:
@@ -226,7 +227,7 @@ class MappingEngine:
             recommendations.append("データクリーニングを実施して再分析することを推奨します")
             return recommendations
         
-        high_confidence_count = len([m for m in enhanced_mappings if m['confidence'] > 0.8])
+        high_confidence_count = len([m for m in enhanced_mappings if m.get('confidence', 0.0) > 0.8])
         total_mappings = len(enhanced_mappings)
         
         if high_confidence_count / total_mappings > 0.8:

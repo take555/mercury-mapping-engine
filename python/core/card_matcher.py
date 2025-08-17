@@ -237,39 +237,42 @@ class CardMatcher:
                 used_b.add(match['row_b_index'])
         
         return unique_matches
-    
-    def analyze_match_quality(self, matches: List[Dict]) -> Dict[str, Any]:
-        """マッチング品質の分析"""
+    def analyze_match_quality(self, matches):
+        """マッチング品質を分析"""
         if not matches:
             return {
                 'total_matches': 0,
-                'average_score': 0,
+                'average_score': 0.0,
                 'high_quality_matches': 0,
-                'quality_distribution': {}
+                'medium_quality_matches': 0,
+                'low_quality_matches': 0
             }
-        
-        scores = [match['match_score'] for match in matches]
-        
-        # 品質分布
-        quality_ranges = {
-            'excellent': (0.9, 1.0),
-            'good': (0.8, 0.9),
-            'fair': (0.7, 0.8),
-            'poor': (0.0, 0.7)
-        }
-        
-        quality_distribution = {}
-        for quality, (min_score, max_score) in quality_ranges.items():
-            count = sum(1 for score in scores if min_score <= score < max_score)
-            quality_distribution[quality] = count
-        
+
+        # スコアを安全に取得
+        scores = []
+        for match in matches:
+            score = (match.get('match_score') or
+                     match.get('similarity') or
+                     match.get('score') or
+                     0.0)
+            try:
+                scores.append(float(score))
+            except (ValueError, TypeError):
+                scores.append(0.0)
+
+        if not scores:
+            scores = [0.0]
+
+        avg_score = sum(scores) / len(scores)
+        high_quality = len([s for s in scores if s > 0.8])
+        medium_quality = len([s for s in scores if 0.6 <= s <= 0.8])
+        low_quality = len([s for s in scores if s < 0.6])
+
         return {
             'total_matches': len(matches),
-            'average_score': sum(scores) / len(scores),
-            'high_quality_matches': sum(1 for score in scores if score > 0.8),
-            'quality_distribution': quality_distribution,
-            'score_range': {
-                'min': min(scores),
-                'max': max(scores)
-            }
+            'average_score': round(avg_score, 3),
+            'high_quality_matches': high_quality,
+            'medium_quality_matches': medium_quality,
+            'low_quality_matches': low_quality
         }
+    

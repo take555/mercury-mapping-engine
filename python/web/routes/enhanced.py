@@ -39,7 +39,7 @@ def enhanced_analysis():
         
         # CSV分析
         csv_result = engine.analyze_csv_files(file_a, file_b, full_analysis=True)
-        
+
         if 'error' in csv_result:
             return _render_error_page("CSV分析エラー", csv_result['error'])
         
@@ -241,14 +241,15 @@ def _build_success_analysis_section(enhanced_mappings, card_matches, mapping_sum
         """
         
         for mapping in enhanced_mappings[:15]:  # 上位15件表示
-            confidence_class = "confidence-high" if mapping['confidence'] > 0.8 else "confidence-medium" if mapping['confidence'] > 0.6 else "confidence-low"
-            
+            confidence = mapping.get('confidence', 0.0)
+            confidence_class = "confidence-high" if confidence > 0.8 else "confidence-medium" if confidence > 0.6 else "confidence-low"
+
             html += f"""
             <tr>
                 <td>{mapping.get('field_type', 'unknown')}</td>
-                <td><strong>{mapping['company_a_field']}</strong></td>
-                <td><strong>{mapping['company_b_field']}</strong></td>
-                <td class="{confidence_class}">{mapping['confidence']:.3f}</td>
+                <td><strong>{mapping.get('company_a_field', '')}</strong></td>
+                <td><strong>{mapping.get('company_b_field', '')}</strong></td>
+                <td class="{confidence_class}">{mapping.get('confidence', 0.0):.3f}</td>
                 <td>{mapping.get('sample_count', 'N/A')}</td>
                 <td>{mapping.get('high_matches', 'N/A')}/{mapping.get('sample_count', 'N/A')}</td>
             </tr>
@@ -270,14 +271,14 @@ def _build_success_analysis_section(enhanced_mappings, card_matches, mapping_sum
         """
         
         for i, match in enumerate(card_matches[:5]):  # 上位5件表示
-            a_preview = ', '.join([f"{k}='{str(v)[:20]}'" for k, v in list(match['row_a_data'].items())[:3]])
-            b_preview = ', '.join([f"{k}='{str(v)[:20]}'" for k, v in list(match['row_b_data'].items())[:3]])
+            a_preview = ', '.join([f"{k}='{str(v)[:20]}'" for k, v in list(match.get('row_a_data', {}).items())[:3]])
+            b_preview = ', '.join([f"{k}='{str(v)[:20]}'" for k, v in list(match.get('row_b_data', {}).items())[:3]])
             
             html += f"""
             <tr>
                 <td style="font-size: 12px;">{a_preview}...</td>
                 <td style="font-size: 12px;">{b_preview}...</td>
-                <td class="confidence-high">{match['match_score']:.3f}</td>
+                <td class="confidence-high">{match.get('match_score', 0.0):.3f}</td>
             </tr>
             """
         

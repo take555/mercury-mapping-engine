@@ -2,14 +2,14 @@
 Mercury Mapping Engine - API Helpers
 API routes共通のヘルパー関数
 """
-from flask import jsonify
-from typing import Dict, Any, Optional
+from flask import jsonify, Response
+from typing import Dict, Any, Optional, Union
 import traceback
 from datetime import datetime
 
 
 def create_success_response(data: Any = None, message: str = "Success", 
-                          status_code: int = 200) -> tuple:
+                          status_code: int = 200) -> Response:
     """成功レスポンスを作成"""
     response_data = {
         "success": True,
@@ -17,11 +17,13 @@ def create_success_response(data: Any = None, message: str = "Success",
         "timestamp": datetime.now().isoformat(),
         "data": data
     }
-    return jsonify(response_data), status_code
+    response = jsonify(response_data)
+    response.status_code = status_code
+    return response
 
 
 def create_error_response(error: str, status_code: int = 400, 
-                         details: Optional[Dict] = None) -> tuple:
+                         details: Optional[Dict] = None) -> Response:
     """エラーレスポンスを作成"""
     response_data = {
         "success": False,
@@ -32,10 +34,12 @@ def create_error_response(error: str, status_code: int = 400,
     if details:
         response_data["details"] = details
     
-    return jsonify(response_data), status_code
+    response = jsonify(response_data)
+    response.status_code = status_code
+    return response
 
 
-def create_validation_error_response(errors: Dict[str, str]) -> tuple:
+def create_validation_error_response(errors: Dict[str, str]) -> Response:
     """バリデーションエラーレスポンスを作成"""
     return create_error_response(
         error="Validation failed",
@@ -44,7 +48,7 @@ def create_validation_error_response(errors: Dict[str, str]) -> tuple:
     )
 
 
-def handle_exception(e: Exception, context: str = "") -> tuple:
+def handle_exception(e: Exception, context: str = "") -> Response:
     """例外を適切なレスポンスに変換"""
     error_message = f"{context}: {str(e)}" if context else str(e)
     
