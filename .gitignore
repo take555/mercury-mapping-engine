@@ -155,4 +155,5 @@ temp_files/
 
 # Config files with sensitive data
 config/production.py
-config/local.pymysql-data/
+config/local.py
+mysql-data/
