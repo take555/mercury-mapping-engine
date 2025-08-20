@@ -160,7 +160,14 @@ def _handle_enhanced_analysis_post():
                     matches = _match_cards_with_claude_mappings(
                         data_a, data_b, claude_mappings, max_sample_size
                     )
-                    enhanced_mappings = claude_mappings
+                    # enhanced_mappingsを辞書形式で作成
+                    enhanced_mappings = {
+                        'flexible_field_mappings': claude_mappings,
+                        'matching_strategy': 'claude_mapping',
+                        'similarity_threshold': 0.8,
+                        'total_comparisons': len(data_a) * len(data_b),
+                        'match_count': len(matches)
+                    }
                 else:
                     analysis_logger.logger.warning("⚠️ Claude マッピング失敗、従来手法にフォールバック")
                     # フォールバック: 柔軟マッチング実行
@@ -219,14 +226,26 @@ def _handle_enhanced_analysis_post():
                 # 柔軟マッチングの結果をマッピングエンジンに渡すため形式変換
                 field_mappings = enhanced_mappings.get('flexible_field_mappings', [])
                 mapping_list = []
-                for field_a, field_b, score in field_mappings:
-                    mapping_list.append({
-                        'field_a': field_a,
-                        'field_b': field_b,
-                        'confidence': score,
-                        'field_type': 'flexible',
-                        'sample_count': 'auto'
-                    })
+                for mapping in field_mappings:
+                    # タプル形式と辞書形式の両方に対応
+                    if isinstance(mapping, (list, tuple)) and len(mapping) >= 3:
+                        # タプル形式: (field_a, field_b, score)
+                        mapping_list.append({
+                            'field_a': mapping[0],
+                            'field_b': mapping[1],
+                            'confidence': mapping[2],
+                            'field_type': 'flexible',
+                            'sample_count': 'auto'
+                        })
+                    elif isinstance(mapping, dict):
+                        # 辞書形式（Claude APIから）
+                        mapping_list.append({
+                            'field_a': mapping.get('field_a', ''),
+                            'field_b': mapping.get('field_b', ''),
+                            'confidence': mapping.get('confidence', 0),
+                            'field_type': mapping.get('field_type', 'claude_api_analysis'),
+                            'sample_count': mapping.get('sample_count', 'auto')
+                        })
                 
                 mapping_summary = engine.create_mapping_summary(mapping_list, matches, analysis_a, analysis_b)
                 validation_result = engine.validate_mapping_results(mapping_list, matches)
