@@ -72,36 +72,57 @@ def find_identical_cards(data_a, data_b, key_fields):
     logger = logging.getLogger('identical_cards')
     
     def calculate_match_score(card_a, card_b):
-        """カード間のマッチスコア計算"""
+        """カード間のマッチスコア計算（カード名最優先）"""
         score = 0.0
         matches = []
         
-        # 各キータイプでのマッチング確認
-        for key_type in ['name', 'id', 'date']:
-            fields_a = key_fields.get('a', {}).get(key_type, [])
-            fields_b = key_fields.get('b', {}).get(key_type, [])
-            
-            for field_a in fields_a:
-                for field_b in fields_b:
-                    val_a = normalize_value(card_a.get(field_a), key_type)
-                    val_b = normalize_value(card_b.get(field_b), key_type)
-                    
-                    if val_a and val_b and val_a == val_b:
-                        # 重要度に応じてスコア加算
-                        if key_type == 'name':
-                            score += 0.5  # 名前は50点
-                        elif key_type == 'id':
-                            score += 0.4   # IDは40点
-                        elif key_type == 'date':
-                            score += 0.1   # 日付は10点
+        # カード名を最優先でチェック（A社・B社入れ替わり対応）
+        name_matched = False
+        fields_a_name = key_fields.get('a', {}).get('name', [])
+        fields_b_name = key_fields.get('b', {}).get('name', [])
+        
+        for field_a in fields_a_name:
+            for field_b in fields_b_name:
+                val_a = normalize_value(card_a.get(field_a), 'name')
+                val_b = normalize_value(card_b.get(field_b), 'name')
+                
+                if val_a and val_b and val_a == val_b:
+                    score += 1.0  # 名前一致は100点（最重要）
+                    name_matched = True
+                    matches.append({
+                        'type': 'name',
+                        'field_a': field_a,
+                        'field_b': field_b,
+                        'value': val_a
+                    })
+                    break
+            if name_matched:
+                break
+        
+        # 名前が一致した場合のみ、日付をボーナスとして追加
+        # 注意: IDフィールドは判定結果として決定されるため、マッチング判定には使用しない
+        if name_matched:
+            for key_type in ['date']:
+                fields_a = key_fields.get('a', {}).get(key_type, [])
+                fields_b = key_fields.get('b', {}).get(key_type, [])
+                
+                for field_a in fields_a:
+                    for field_b in fields_b:
+                        val_a = normalize_value(card_a.get(field_a), key_type)
+                        val_b = normalize_value(card_b.get(field_b), key_type)
                         
-                        matches.append({
-                            'type': key_type,
-                            'field_a': field_a,
-                            'field_b': field_b,
-                            'value': val_a
-                        })
-                        break  # 同タイプで複数マッチしても1回のみカウント
+                        if val_a and val_b and val_a == val_b:
+                            # ボーナス点を追加
+                            if key_type == 'date':
+                                score += 0.1   # 日付ボーナス: 10点
+                            
+                            matches.append({
+                                'type': key_type,
+                                'field_a': field_a,
+                                'field_b': field_b,
+                                'value': val_a
+                            })
+                            break  # 同タイプで複数マッチしても1回のみカウント
         
         return score, matches
     
@@ -113,8 +134,8 @@ def find_identical_cards(data_a, data_b, key_fields):
         for card_b in data_b:
             score, match_details = calculate_match_score(card_a, card_b)
             
-            # スコア0.8以上を同一カードとして判定
-            if score >= 0.8:
+            # スコア1.0以上を同一カードとして判定（カード名必須）
+            if score >= 1.0:
                 identical_pairs.append({
                     'card_a': card_a,
                     'card_b': card_b,
@@ -123,7 +144,59 @@ def find_identical_cards(data_a, data_b, key_fields):
                 })
     
     logger.info(f"同一カード特定完了: {len(identical_pairs)}組")
-    return identical_pairs
+    
+    # データ管理粒度の違いに対応：同一カードの統合
+    consolidated_pairs = consolidate_identical_cards(identical_pairs, logger)
+    logger.info(f"カード統合後: {len(consolidated_pairs)}組")
+    
+    return consolidated_pairs
+
+def consolidate_identical_cards(identical_pairs, logger):
+    """同一カードの統合（データ管理粒度の違いに対応）"""
+    from collections import defaultdict
+    
+    # カード名でグループ化
+    card_groups = defaultdict(list)
+    
+    for pair in identical_pairs:
+        # カード名を取得（A社・B社のどちらからでも）
+        card_a = pair['card_a']
+        card_b = pair['card_b']
+        
+        # カード名の候補フィールドを試行
+        name_candidates_a = ['カード名', 'name', '商品名', 'title', 'product']
+        name_candidates_b = ['name', 'name_short', 'カード名', '商品名', 'title']
+        
+        card_name = None
+        for field in name_candidates_a:
+            if field in card_a and card_a[field]:
+                card_name = str(card_a[field]).strip()
+                break
+        
+        if not card_name:
+            for field in name_candidates_b:
+                if field in card_b and card_b[field]:
+                    card_name = str(card_b[field]).strip()
+                    break
+        
+        if card_name:
+            # 正規化したカード名でグループ化
+            normalized_name = normalize_value(card_name, 'name')
+            card_groups[normalized_name].append(pair)
+    
+    consolidated_pairs = []
+    
+    for normalized_name, group in card_groups.items():
+        if len(group) == 1:
+            # グループに1つだけの場合はそのまま追加
+            consolidated_pairs.append(group[0])
+        else:
+            # 複数ある場合は最も高いスコアのペアを代表として選択
+            best_pair = max(group, key=lambda x: x['match_score'])
+            logger.info(f"カード '{normalized_name}' の{len(group)}件を統合 → 最高スコア{best_pair['match_score']}")
+            consolidated_pairs.append(best_pair)
+    
+    return consolidated_pairs
 
 # ===============================================
 # Stage 2: フィールドマッピング学習システム
@@ -184,22 +257,172 @@ def analyze_field_mappings_from_pairs(identical_pairs, headers_a, headers_b):
             if confidence >= 0.5:
                 field_a, field_b = field_pair.split('→')
                 
+                # IDフィールドかどうかを判定
+                field_a_clean = field_a.replace('\ufeff', '').strip()
+                field_b_clean = field_b.replace('\ufeff', '').strip()
+                is_id_field = is_id_field_mapping(field_a_clean, field_b_clean)
+                
                 field_mappings.append({
-                    'field_a': field_a.replace('\ufeff', '').strip(),
-                    'field_b': field_b.replace('\ufeff', '').strip(),
+                    'field_a': field_a_clean,
+                    'field_b': field_b_clean,
                     'confidence': round(confidence, 3),
                     'sample_count': stats['exact_matches'],
                     'total_comparisons': stats['total_comparisons'],
-                    'field_type': 'learned_from_identical_cards',
-                    'quality_score': 'High' if confidence > 0.8 else 'Medium',
-                    'sample_values': stats['sample_values']
+                    'field_type': 'id_mapping' if is_id_field else 'learned_from_identical_cards',
+                    'quality_score': 'ID_Field' if is_id_field else ('High' if confidence > 0.8 else 'Medium'),
+                    'sample_values': stats['sample_values'],
+                    'is_id_field': is_id_field
                 })
     
     # 信頼度でソート
     field_mappings.sort(key=lambda x: x['confidence'], reverse=True)
     
     logger.info(f"フィールドマッピング学習完了: {len(field_mappings)}件")
-    return field_mappings
+    
+    # 共起パターン分析を追加実行（テスト）
+    cooccurrence_mappings = analyze_cooccurrence_patterns(identical_pairs, headers_a, headers_b, logger)
+    
+    # 既存マッピングと共起マッピングを統合
+    enhanced_mappings = merge_mappings(field_mappings, cooccurrence_mappings, logger)
+    
+    return enhanced_mappings
+
+def is_id_field_mapping(field_a, field_b):
+    """IDフィールドマッピングかどうかを判定"""
+    id_patterns = [
+        'id', 'ID', 'Id',
+        'serial', 'Serial', 'SERIAL',
+        '型番', '棚番', 'コード', 'code', 'Code', 'CODE',
+        'number', 'Number', 'NUMBER', 'No', 'no', 'NO',
+        'jan', 'JAN', 'sku', 'SKU',
+        'product_id', 'item_id', 'card_id',
+        'product_code', 'item_code', 'card_code'
+    ]
+    
+    # フィールド名にIDパターンが含まれているかチェック
+    field_a_lower = field_a.lower()
+    field_b_lower = field_b.lower()
+    
+    for pattern in id_patterns:
+        pattern_lower = pattern.lower()
+        if pattern_lower in field_a_lower or pattern_lower in field_b_lower:
+            return True
+    
+    return False
+
+def analyze_cooccurrence_patterns(identical_pairs, headers_a, headers_b, logger):
+    """同一カードペア間での値共起パターン分析"""
+    import math
+    from collections import defaultdict, Counter
+    
+    logger.info("🔍 共起パターン分析開始...")
+    
+    cooccurrence_stats = {}
+    
+    for field_a in headers_a:
+        for field_b in headers_b:
+            # 値ペアを収集
+            value_pairs = []
+            valid_pairs = 0
+            
+            for pair in identical_pairs:
+                val_a = str(pair['card_a'].get(field_a, '')).strip()
+                val_b = str(pair['card_b'].get(field_b, '')).strip()
+                
+                # 空でない値のペアのみ収集
+                if val_a and val_b and val_a != 'N/A' and val_b != 'N/A':
+                    value_pairs.append((val_a, val_b))
+                    valid_pairs += 1
+            
+            # サンプルがある場合のみ分析（テスト用に閾値を1に）
+            if valid_pairs >= 1:
+                mutual_info = calculate_mutual_information(value_pairs)
+                unique_patterns = len(set(value_pairs))
+                
+                cooccurrence_stats[f"{field_a}→{field_b}"] = {
+                    'field_a': field_a,
+                    'field_b': field_b,
+                    'mutual_information': mutual_info,
+                    'sample_count': valid_pairs,
+                    'unique_patterns': unique_patterns,
+                    'pattern_diversity': unique_patterns / valid_pairs,
+                    'top_patterns': Counter(value_pairs).most_common(3)
+                }
+    
+    # 相互情報量でソートして上位を取得
+    sorted_stats = sorted(cooccurrence_stats.items(), 
+                         key=lambda x: x[1]['mutual_information'], reverse=True)
+    
+    cooccurrence_mappings = []
+    for field_pair, stats in sorted_stats[:20]:  # 上位20件
+        # 相互情報量を信頼度に変換（0-1スケール）
+        confidence = min(stats['mutual_information'] / 2.0, 1.0)
+        
+        if confidence > 0.3:  # 閾値0.3以上のみ採用
+            cooccurrence_mappings.append({
+                'field_a': stats['field_a'],
+                'field_b': stats['field_b'],
+                'confidence': round(confidence, 3),
+                'sample_count': stats['sample_count'],
+                'total_comparisons': stats['sample_count'],
+                'field_type': 'cooccurrence_pattern',
+                'quality_score': 'Cooccurrence',
+                'mutual_information': round(stats['mutual_information'], 3),
+                'pattern_diversity': round(stats['pattern_diversity'], 3),
+                'top_patterns': stats['top_patterns']
+            })
+    
+    logger.info(f"✅ 共起パターン分析完了: {len(cooccurrence_mappings)}件検出")
+    return cooccurrence_mappings
+
+def calculate_mutual_information(value_pairs):
+    """相互情報量を計算"""
+    if not value_pairs:
+        return 0.0
+    
+    from collections import Counter
+    import math
+    
+    # 値ペアの頻度カウント
+    pair_counts = Counter(value_pairs)
+    total_pairs = len(value_pairs)
+    
+    # 個別値の頻度カウント
+    values_a = [pair[0] for pair in value_pairs]
+    values_b = [pair[1] for pair in value_pairs]
+    counts_a = Counter(values_a)
+    counts_b = Counter(values_b)
+    
+    # 相互情報量計算
+    mutual_info = 0.0
+    for (val_a, val_b), joint_count in pair_counts.items():
+        p_joint = joint_count / total_pairs
+        p_a = counts_a[val_a] / total_pairs
+        p_b = counts_b[val_b] / total_pairs
+        
+        if p_joint > 0:
+            mutual_info += p_joint * math.log2(p_joint / (p_a * p_b))
+    
+    return max(0.0, mutual_info)
+
+def merge_mappings(field_mappings, cooccurrence_mappings, logger):
+    """既存マッピングと共起マッピングを統合"""
+    existing_pairs = set(f"{m['field_a']}→{m['field_b']}" for m in field_mappings)
+    
+    # 新しく発見された共起パターン
+    new_mappings = []
+    for mapping in cooccurrence_mappings:
+        pair_key = f"{mapping['field_a']}→{mapping['field_b']}"
+        if pair_key not in existing_pairs:
+            new_mappings.append(mapping)
+            logger.info(f"🆕 新発見: {mapping['field_a']} ↔ {mapping['field_b']} "
+                       f"(信頼度: {mapping['confidence']}, 相互情報量: {mapping['mutual_information']})")
+    
+    # 統合してソート
+    all_mappings = field_mappings + new_mappings
+    all_mappings.sort(key=lambda x: x['confidence'], reverse=True)
+    
+    return all_mappings
 
 def normalize_for_comparison(value):
     """比較用の値正規化"""

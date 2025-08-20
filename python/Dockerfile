@@ -16,6 +16,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # アプリケーションコードをコピー
 COPY . .
 
+# ログディレクトリを作成して権限設定
+RUN mkdir -p /app/logs && chown -R 1000:1000 /app/logs && chmod 755 /app/logs
+
 EXPOSE 5000
 
 CMD ["python", "app.py"]

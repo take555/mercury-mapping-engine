@@ -4,6 +4,7 @@ Webページルートの登録管理
 """
 from flask import Blueprint
 from .index import index_bp
+# from .test_pages import test_bp
 from .enhanced import enhanced_bp
 
 
@@ -12,6 +13,7 @@ def register_web_routes(app):
     
     # 各機能のブループリントを直接登録
     app.register_blueprint(index_bp)
+    # app.register_blueprint(test_bp)
     app.register_blueprint(enhanced_bp)
     
     app.logger.info("✅ Web routes registered")

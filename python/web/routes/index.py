@@ -12,6 +12,12 @@ index_bp = Blueprint('index', __name__)
 @index_bp.route('/')
 def index():
     """メインページ"""
+    from flask import request, current_app
+    
+    current_app.logger.info("📍 TOP PAGE アクセス - Mercury Mapping Engine")
+    current_app.logger.info(f"   - アクセス元IP: {request.remote_addr}")
+    current_app.logger.info(f"   - User-Agent: {request.headers.get('User-Agent', 'Unknown')}")
+    
     claude_status = "✅ 設定済み" if os.getenv('CLAUDE_API_KEY') and os.getenv('CLAUDE_API_KEY') != 'your-api-key-here' else "❌ 未設定"
     
     return f'''

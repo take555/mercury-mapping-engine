@@ -7,6 +7,9 @@ from typing import List, Dict
 import os
 import time
 import traceback
+import csv
+import json
+import requests
 from core import create_mapping_engine
 from core.flexible_matching import flexible_enhanced_matching
 from config.settings import Config
@@ -19,11 +22,19 @@ enhanced_bp = Blueprint('enhanced', __name__)
 @enhanced_bp.route('/test/files/enhanced', methods=['GET', 'POST'])
 def enhanced_analysis():
     """カードベース分析フォーム表示と分析実行"""
+    from flask import current_app
+    current_app.logger.info("🔥 高精度CSV分析ページ アクセス")
+    current_app.logger.info(f"   - リクエストメソッド: {request.method}")
+    current_app.logger.info(f"   - アクセス元IP: {request.remote_addr}")
+    current_app.logger.info(f"   - User-Agent: {request.headers.get('User-Agent', 'Unknown')[:100]}...")
+    
     if request.method == 'GET':
         # GET: フォーム表示
+        current_app.logger.info("   - フォーム表示モード")
         return _build_enhanced_analysis_form()
     else:
         # POST: 分析実行
+        current_app.logger.info("   - 分析実行モード")
         return _handle_enhanced_analysis_post()
 
 
@@ -40,7 +51,7 @@ def _handle_enhanced_analysis_post():
         similarity_mode = request.form.get('similarity_mode', 'library')
         max_sample_size = int(request.form.get('max_sample_size', 100))
         full_analysis = request.form.get('full_analysis') == 'on'
-        ai_model = request.form.get('ai_model', 'claude-3-haiku-20240307')
+        ai_model = request.form.get('ai_model', 'claude-3-5-sonnet-20241022')
 
         analysis_logger.logger.info(f"📋 設定情報:")
         analysis_logger.logger.info(f"   - 分析モード: {similarity_mode}")
@@ -129,14 +140,39 @@ def _handle_enhanced_analysis_post():
             analysis_logger.logger.info(f"   - B社データ: {len(data_b)}行")
             analysis_logger.logger.info(f"   - 新手法: AI/文字列類似度による柔軟なデータマッチング")
 
-            # 柔軟マッチング実行 (AI/文字列類似度ベース)
-            matches, enhanced_mappings = flexible_enhanced_matching(
-                data_a,
-                data_b,
-                analysis_a['headers'],
-                analysis_b['headers'],
-                max_sample_size=max_sample_size
-            )
+            # Claude Mapping Modeの場合は先にフィールドマッピングを取得
+            if similarity_mode == 'claude_mapping':
+                analysis_logger.logger.info("🧠 Claude APIフィールドマッピング分析開始")
+                claude_mappings = _claude_field_mapping_analysis(
+                    analysis_a['headers'], 
+                    analysis_b['headers'], 
+                    data_a[:10],  # サンプルデータ
+                    data_b[:10],
+                    ai_model  # 選択されたモデルを渡す
+                )
+                
+                if claude_mappings:
+                    analysis_logger.logger.info(f"✅ Claude マッピング取得: {len(claude_mappings)}件")
+                    # Claudeマッピングを使って同一カード特定
+                    matches = _match_cards_with_claude_mappings(
+                        data_a, data_b, claude_mappings, max_sample_size
+                    )
+                    enhanced_mappings = claude_mappings
+                else:
+                    analysis_logger.logger.warning("⚠️ Claude マッピング失敗、従来手法にフォールバック")
+                    # フォールバック: 柔軟マッチング実行
+                    matches, enhanced_mappings = flexible_enhanced_matching(
+                        data_a, data_b, analysis_a['headers'], analysis_b['headers'], max_sample_size
+                    )
+            else:
+                # 柔軟マッチング実行 (AI/文字列類似度ベース)
+                matches, enhanced_mappings = flexible_enhanced_matching(
+                    data_a,
+                    data_b,
+                    analysis_a['headers'],
+                    analysis_b['headers'],
+                    max_sample_size=max_sample_size
+                )
 
             matching_time = time.time() - start_time
             analysis_logger.logger.info(f"✅ 柔軟マッチング完了 ({matching_time:.2f}秒)")
@@ -149,6 +185,13 @@ def _handle_enhanced_analysis_post():
             analysis_logger.logger.info(f"   - 戦略: {enhanced_mappings.get('matching_strategy', 'unknown')}")
             analysis_logger.logger.info(f"   - 類似度閾値: {enhanced_mappings.get('similarity_threshold', 0.0)}")
             analysis_logger.logger.info(f"   - 総比較回数: {enhanced_mappings.get('total_comparisons', 0):,}回")
+
+            # CSV出力機能を追加
+            try:
+                _export_matches_to_csv(matches, enhanced_mappings, analysis_a['headers'], analysis_b['headers'])
+                analysis_logger.logger.info("✅ マッチングデータをresults/test.csvに出力しました")
+            except Exception as e:
+                analysis_logger.logger.error(f"❌ CSV出力エラー: {e}")
 
             card_analysis_success = True
 
@@ -500,6 +543,27 @@ def _build_enhanced_analysis_form() -> str:
                                 </div>
                             </label>
                         </div>
+
+                        <div class="mode-option">
+                            <input type="radio" id="mode_claude_mapping" name="similarity_mode" value="claude_mapping">
+                            <label for="mode_claude_mapping" class="mode-label">
+                                <div class="mode-header">
+                                    <span class="mode-icon">🧠</span>
+                                    <strong>Claude Mapping Mode</strong>
+                                    <span class="mode-badge new">New</span>
+                                </div>
+                                <div class="mode-description">
+                                    <p>Claude AIによる直感的フィールドマッピング</p>
+                                    <ul>
+                                        <li>✅ 人間的な判断でフィールド対応を決定</li>
+                                        <li>✅ 概念的・意味的関連性を理解</li>
+                                        <li>✅ 信頼度付きマッピング結果</li>
+                                        <li>💰 API使用料: ~$0.005-0.02</li>
+                                        <li>🎯 おすすめ: 新しいCSVペアの分析</li>
+                                    </ul>
+                                </div>
+                            </label>
+                        </div>
                     </div>
                 </div>
 
@@ -532,9 +596,11 @@ def _build_enhanced_analysis_form() -> str:
                         <div class="setting-item ai-only" style="display: none;">
                             <label for="ai_model">AIモデル:</label>
                             <select id="ai_model" name="ai_model">
-                                <option value="claude-3-haiku-20240307">Haiku (高速・低コスト)</option>
-                                <option value="claude-3-sonnet-20240229">Sonnet (バランス)</option>
-                                <option value="claude-3-5-sonnet-20240620">3.5 Sonnet (高性能)</option>
+                                <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku (超高速・低コスト)</option>
+                                <option value="claude-3-5-sonnet-20241022" selected>Claude 3.5 Sonnet (推奨・高性能)</option>
+                                <option value="claude-3-opus-20240229">Claude 3 Opus (最高性能・高コスト)</option>
+                                <option value="claude-3-sonnet-20240229">Claude 3 Sonnet (旧版)</option>
+                                <option value="claude-3-haiku-20240307">Claude 3 Haiku (旧版)</option>
                             </select>
                         </div>
                     </div>
@@ -608,6 +674,7 @@ def _build_enhanced_analysis_form() -> str:
         document.addEventListener('DOMContentLoaded', function() {
             const libraryMode = document.getElementById('mode_library');
             const aiMode = document.getElementById('mode_ai');
+            const claudeMappingMode = document.getElementById('mode_claude_mapping');
             const aiOnlySettings = document.querySelectorAll('.ai-only');
             const analysisInfo = document.querySelector('.info-text');
             const form = document.getElementById('analysisForm');
@@ -618,13 +685,18 @@ def _build_enhanced_analysis_form() -> str:
             let startTime;
 
             function updateUI() {
-                if (aiMode.checked) {
+                if (aiMode.checked || claudeMappingMode.checked) {
                     aiOnlySettings.forEach(el => {
                         el.style.display = 'block';
                         el.style.opacity = '1';
                     });
-                    analysisInfo.textContent = 'Claude AIによる高精度意味解析を実行します（API使用料が発生します）';
-                    document.getElementById('step3Text').textContent = 'AI意味解析実行';
+                    if (claudeMappingMode.checked) {
+                        analysisInfo.textContent = 'Claude AIによる直感的フィールドマッピングを実行します（API使用料が発生します）';
+                        document.getElementById('step3Text').textContent = 'Claude フィールドマッピング';
+                    } else {
+                        analysisInfo.textContent = 'Claude AIによる高精度意味解析を実行します（API使用料が発生します）';
+                        document.getElementById('step3Text').textContent = 'AI意味解析実行';
+                    }
                 } else {
                     aiOnlySettings.forEach(el => {
                         el.style.display = 'none';
@@ -737,6 +809,7 @@ def _build_enhanced_analysis_form() -> str:
 
             libraryMode.addEventListener('change', updateUI);
             aiMode.addEventListener('change', updateUI);
+            claudeMappingMode.addEventListener('change', updateUI);
             updateUI();
         });
         </script>
@@ -904,6 +977,290 @@ def _is_serial_field(field_name: str, data_sample: List[Dict] = None) -> bool:
     
     return False
 
+
+def _export_matches_to_csv(matches, enhanced_mappings, headers_a, headers_b):
+    """マッチングデータをCSVファイルに出力（A社データ + 区切り + B社データ形式）"""
+    
+    # 出力ディレクトリを作成
+    output_dir = '/app/results'
+    os.makedirs(output_dir, exist_ok=True)
+    
+    output_file = os.path.join(output_dir, 'test.csv')
+    
+    # CSVヘッダーを構築：A社全フィールド + 区切り + B社全フィールド + マッチスコア
+    csv_headers = []
+    
+    # A社全フィールドを追加
+    for header in headers_a:
+        csv_headers.append(f"A社_{header}")
+    
+    # 区切り文字列
+    csv_headers.append("____####____")
+    
+    # B社全フィールドを追加  
+    for header in headers_b:
+        csv_headers.append(f"B社_{header}")
+    
+    # マッチスコアを追加
+    csv_headers.append("マッチスコア")
+    
+    # CSVファイルに書き込み
+    with open(output_file, 'w', newline='', encoding='utf-8-sig') as csvfile:
+        writer = csv.writer(csvfile)
+        
+        # ヘッダー行を書き込み
+        writer.writerow(csv_headers)
+        
+        # データ行を書き込み
+        for match in matches:
+            card_a = match.get('card_a', {})
+            card_b = match.get('card_b', {})
+            similarity = match.get('overall_similarity', 0.0)
+            
+            row = []
+            
+            # A社全フィールドのデータを追加
+            for header in headers_a:
+                value_a = str(card_a.get(header, '')).strip() or 'N/A'
+                row.append(value_a)
+            
+            # 区切り文字列を追加
+            row.append("____####____")
+            
+            # B社全フィールドのデータを追加
+            for header in headers_b:
+                value_b = str(card_b.get(header, '')).strip() or 'N/A'
+                row.append(value_b)
+            
+            # マッチスコアを追加
+            row.append(f"{similarity:.3f}")
+            
+            writer.writerow(row)
+    
+    return output_file
+
+def _claude_field_mapping_analysis(headers_a, headers_b, sample_data_a, sample_data_b, model_name='claude-3-5-sonnet-20241022'):
+    """Claude APIを使ってフィールドマッピングを分析"""
+    try:
+        # Claude API設定
+        api_key = os.environ.get('CLAUDE_API_KEY')
+        if not api_key:
+            analysis_logger.logger.error("CLAUDE_API_KEY環境変数が設定されていません")
+            return []
+        
+        # CSVサンプルデータを準備
+        csv_sample_a = _format_csv_sample(headers_a, sample_data_a[:5])
+        csv_sample_b = _format_csv_sample(headers_b, sample_data_b[:5])
+        
+        # Claude APIプロンプト
+        prompt = f"""この2つのCSVファイルを比較して、A社とB社の対応するフィールドペアを特定してください。信頼度も含めて教えてください。
+
+A社のCSV:
+```
+{csv_sample_a}
+```
+
+B社のCSV:
+```
+{csv_sample_b}
+```
+
+以下のJSON形式で回答してください：
+{{
+    "field_mappings": [
+        {{
+            "field_a": "A社フィールド名",
+            "field_b": "B社フィールド名", 
+            "confidence": 0.95,
+            "reasoning": "判断理由"
+        }}
+    ]
+}}
+
+完全一致、概念的一致、形式的一致を含めて判断してください。"""
+
+        # Claude API呼び出し
+        headers = {
+            'Content-Type': 'application/json',
+            'x-api-key': api_key,
+            'anthropic-version': '2023-06-01'
+        }
+        
+        data = {
+            'model': model_name,
+            'max_tokens': 4000,
+            'messages': [
+                {
+                    'role': 'user',
+                    'content': prompt
+                }
+            ]
+        }
+        
+        from flask import current_app
+        current_app.logger.info("🤖 Claude APIでフィールドマッピング分析開始...")
+        current_app.logger.info(f"   - リクエストURL: https://api.anthropic.com/v1/messages")
+        current_app.logger.info(f"   - モデル: {data['model']}")
+        current_app.logger.info(f"   - プロンプト長: {len(prompt)}文字")
+        current_app.logger.info("   - リクエストデータ:")
+        current_app.logger.info(f"     プロンプト: {prompt[:200]}...")
+        
+        import time
+        
+        # リトライ機能付きでClaude API呼び出し
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(
+                    'https://api.anthropic.com/v1/messages',
+                    headers=headers,
+                    json=data,
+                    timeout=60
+                )
+                
+                current_app.logger.info(f"   - レスポンス状態: {response.status_code} (試行 {attempt + 1}/{max_retries})")
+                
+                if response.status_code == 200:
+                    break
+                elif response.status_code == 529:  # Overloaded
+                    current_app.logger.warning(f"   - Claude API過負荷、{5 * (attempt + 1)}秒後にリトライ...")
+                    if attempt < max_retries - 1:
+                        time.sleep(5 * (attempt + 1))  # 指数バックオフ
+                        continue
+                else:
+                    break
+                    
+            except requests.exceptions.Timeout:
+                current_app.logger.error(f"   - タイムアウトエラー (試行 {attempt + 1}/{max_retries})")
+                if attempt < max_retries - 1:
+                    time.sleep(5 * (attempt + 1))
+                    continue
+                else:
+                    break
+        
+        if response.status_code == 200:
+            result = response.json()
+            content = result['content'][0]['text']
+            
+            current_app.logger.info("   - Claude APIレスポンス受信成功")
+            current_app.logger.info(f"     レスポンス長: {len(content)}文字")
+            current_app.logger.info(f"     レスポンス内容: {content[:500]}...")
+            
+            # JSONを抽出・パース
+            import re
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                current_app.logger.info(f"     JSON抽出成功: {len(json_match.group())}文字")
+                mapping_data = json.loads(json_match.group())
+                field_mappings = mapping_data.get('field_mappings', [])
+                
+                current_app.logger.info(f"✅ Claude APIマッピング完了: {len(field_mappings)}件")
+                for i, mapping in enumerate(field_mappings):
+                    current_app.logger.info(f"     マッピング{i+1}: {mapping['field_a']} -> {mapping['field_b']} (信頼度: {mapping['confidence']})")
+                
+                # enhanced.py形式に変換
+                enhanced_mappings = []
+                for mapping in field_mappings:
+                    enhanced_mappings.append({
+                        'field_a': mapping['field_a'],
+                        'field_b': mapping['field_b'], 
+                        'confidence': mapping['confidence'],
+                        'sample_count': len(sample_data_a),
+                        'total_comparisons': len(sample_data_a),
+                        'field_type': 'claude_api_analysis',
+                        'quality_score': 'Claude_AI',
+                        'reasoning': mapping.get('reasoning', '')
+                    })
+                
+                return enhanced_mappings
+            else:
+                current_app.logger.error("Claude APIレスポンスからJSONを抽出できませんでした")
+                current_app.logger.error(f"     レスポンス全文: {content}")
+                return []
+        else:
+            current_app.logger.error(f"Claude API呼び出し失敗: {response.status_code}")
+            current_app.logger.error(f"     エラーレスポンス: {response.text}")
+            
+            # 高コストモデルで過負荷の場合、軽量モデルでリトライ
+            if response.status_code == 529 and model_name in ['claude-3-5-sonnet-20241022', 'claude-3-opus-20240229']:
+                current_app.logger.info("   - 軽量モデル(Haiku)でフォールバック試行...")
+                return _claude_field_mapping_analysis(headers_a, headers_b, sample_data_a, sample_data_b, 'claude-3-5-haiku-20241022')
+            
+            return []
+            
+    except Exception as e:
+        current_app.logger.error(f"Claude APIマッピング分析エラー: {str(e)}")
+        return []
+
+def _format_csv_sample(headers, sample_data):
+    """CSVサンプルデータを文字列形式にフォーマット"""
+    lines = [','.join(headers)]
+    for row in sample_data:
+        values = [str(row.get(header, '')).replace(',', ';') for header in headers]
+        lines.append(','.join(values))
+    return '\n'.join(lines)
+
+def _match_cards_with_claude_mappings(data_a, data_b, claude_mappings, max_sample_size):
+    """Claudeマッピングを使って同一カード特定"""
+    import time
+    start_time = time.time()
+    
+    # データサイズ制限
+    if len(data_a) > max_sample_size:
+        data_a = data_a[:max_sample_size]
+    if len(data_b) > max_sample_size:
+        data_b = data_b[:max_sample_size]
+    
+    analysis_logger.logger.info(f"🔍 Claudeマッピングベースカード特定開始: {len(data_a)}×{len(data_b)}行")
+    
+    # 高信頼度マッピングのみを使用（confidence > 0.8）
+    reliable_mappings = {}
+    for mapping in claude_mappings:
+        if mapping.get('confidence', 0) > 0.8:
+            reliable_mappings[mapping['field_a']] = mapping['field_b']
+    
+    analysis_logger.logger.info(f"📝 使用する高信頼度マッピング: {len(reliable_mappings)}件")
+    
+    matches = []
+    for card_a in data_a:
+        best_match = None
+        best_score = 0.0
+        
+        for card_b in data_b:
+            score = 0.0
+            matched_fields = 0
+            
+            # 高信頼度マッピングでスコア計算
+            for field_a, field_b in reliable_mappings.items():
+                val_a = str(card_a.get(field_a, '')).strip().lower()
+                val_b = str(card_b.get(field_b, '')).strip().lower()
+                
+                if val_a and val_b and val_a != 'n/a':
+                    matched_fields += 1
+                    if val_a == val_b:
+                        score += 1.0  # 完全一致
+                    elif val_a in val_b or val_b in val_a:
+                        score += 0.7  # 部分一致
+            
+            # 正規化スコア
+            if matched_fields > 0:
+                normalized_score = score / matched_fields
+                if normalized_score > best_score and normalized_score >= 0.7:  # 70%以上の一致
+                    best_score = normalized_score
+                    best_match = card_b
+        
+        if best_match:
+            matches.append({
+                'card_a': card_a,
+                'card_b': best_match,
+                'overall_similarity': round(best_score, 3),
+                'similarity_details': {}
+            })
+    
+    elapsed_time = time.time() - start_time
+    analysis_logger.logger.info(f"✅ Claudeマッピングベース特定完了: {len(matches)}組 ({elapsed_time:.2f}秒)")
+    
+    return matches
 
 def _build_success_analysis_section(enhanced_mappings, card_matches, mapping_summary, validation_result):
     """成功時の分析セクション生成（タプル対応）"""

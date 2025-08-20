@@ -23,6 +23,7 @@ services:
   python:
     build: ./python
     container_name: mercury-python
+    user: "1000:1000"
     environment:
       - MYSQL_HOST=mysql
       - MYSQL_USER=mercury
@@ -35,7 +36,6 @@ services:
       - ./python:/app
       - ./uploads:/app/uploads
       - ./results:/app/results
-      - ./logs:/app/logs
     depends_on:
       - mysql
     restart: on-failure
