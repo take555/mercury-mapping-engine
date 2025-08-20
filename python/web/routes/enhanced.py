@@ -51,7 +51,10 @@ def _handle_enhanced_analysis_post():
         similarity_mode = request.form.get('similarity_mode', 'library')
         max_sample_size = int(request.form.get('max_sample_size', 100))
         full_analysis = request.form.get('full_analysis') == 'on'
-        ai_model = request.form.get('ai_model', 'claude-3-5-sonnet-20241022')
+        # デフォルトモデルを動的に取得（最初のモデル）
+        available_models = _get_available_claude_models()
+        default_model = available_models[0]['id'] if available_models else 'claude-sonnet-4-20250514'
+        ai_model = request.form.get('ai_model', default_model)
 
         analysis_logger.logger.info(f"📋 設定情報:")
         analysis_logger.logger.info(f"   - 分析モード: {similarity_mode}")
@@ -277,9 +280,97 @@ def _handle_enhanced_analysis_post():
         return _render_error_page("システムエラー", str(e), traceback.format_exc())
 
 
+def _get_available_claude_models():
+    """Claude API Models APIから利用可能なモデル一覧を取得"""
+    try:
+        api_key = os.environ.get('CLAUDE_API_KEY')
+        if not api_key:
+            # フォールバック: 静的リスト
+            return [
+                {'id': 'claude-sonnet-4-20250514', 'display_name': 'Claude 4 Sonnet (最新・最高性能)'},
+                {'id': 'claude-3-5-sonnet-20241022', 'display_name': 'Claude 3.5 Sonnet (高性能・推奨)'},
+                {'id': 'claude-3-5-haiku-20241022', 'display_name': 'Claude 3.5 Haiku (超高速・低コスト)'},
+            ]
+        
+        headers = {
+            'x-api-key': api_key,
+            'anthropic-version': '2023-06-01'
+        }
+        
+        from flask import current_app
+        current_app.logger.info("🔍 Claude Models API でモデル一覧を取得中...")
+        
+        response = requests.get('https://api.anthropic.com/v1/models', headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            models = []
+            
+            # モデルを新しい順にソート（created_atが新しい順）
+            sorted_models = sorted(data.get('data', []), key=lambda x: x.get('created_at', ''), reverse=True)
+            
+            for model in sorted_models:
+                model_id = model.get('id', '')
+                display_name = model.get('display_name', model_id)
+                
+                # 説明を追加
+                description = ""
+                if 'sonnet-4' in model_id.lower():
+                    description = " (最新・最高性能)"
+                elif '3.5-sonnet' in model_id.lower():
+                    description = " (高性能・推奨)"  
+                elif '3.5-haiku' in model_id.lower():
+                    description = " (超高速・低コスト)"
+                elif 'opus' in model_id.lower():
+                    description = " (旧最高性能)"
+                elif 'sonnet' in model_id.lower() and '3-sonnet' in model_id.lower():
+                    description = " (旧版)"
+                elif 'haiku' in model_id.lower() and '3-haiku' in model_id.lower():
+                    description = " (旧版)"
+                
+                models.append({
+                    'id': model_id,
+                    'display_name': f"{display_name}{description}"
+                })
+            
+            current_app.logger.info(f"✅ {len(models)}個のモデルを取得")
+            return models
+        else:
+            current_app.logger.warning(f"⚠️ Models API失敗: {response.status_code}, フォールバック使用")
+            # フォールバック: 静的リスト
+            return [
+                {'id': 'claude-sonnet-4-20250514', 'display_name': 'Claude 4 Sonnet (最新・最高性能)'},
+                {'id': 'claude-3-5-sonnet-20241022', 'display_name': 'Claude 3.5 Sonnet (高性能・推奨)'},
+                {'id': 'claude-3-5-haiku-20241022', 'display_name': 'Claude 3.5 Haiku (超高速・低コスト)'},
+            ]
+            
+    except Exception as e:
+        from flask import current_app
+        current_app.logger.error(f"❌ Models API エラー: {e}")
+        # フォールバック: 静的リスト
+        return [
+            {'id': 'claude-sonnet-4-20250514', 'display_name': 'Claude 4 Sonnet (最新・最高性能)'},
+            {'id': 'claude-3-5-sonnet-20241022', 'display_name': 'Claude 3.5 Sonnet (高性能・推奨)'},
+            {'id': 'claude-3-5-haiku-20241022', 'display_name': 'Claude 3.5 Haiku (超高速・低コスト)'},
+        ]
+
 def _build_enhanced_analysis_form() -> str:
     """高精度分析フォーム（プログレス表示付き）"""
-    return """
+    # 利用可能なモデルを動的に取得
+    available_models = _get_available_claude_models()
+    model_options = ""
+    
+    for i, model in enumerate(available_models):
+        selected = 'selected' if i == 0 else ''  # 最初のモデル（最新）をデフォルト選択
+        model_options += f'                                <option value="{model["id"]}" {selected}>{model["display_name"]}</option>\n'
+    
+    # HTMLテンプレートを取得してモデル部分を置換
+    html_template = _get_html_template()
+    return html_template.replace("{{MODEL_OPTIONS}}", model_options)
+
+def _get_html_template():
+    """HTMLテンプレートを返す（raw string使用）"""
+    return r"""
     <!DOCTYPE html>
     <html>
     <head>
@@ -596,12 +687,7 @@ def _build_enhanced_analysis_form() -> str:
                         <div class="setting-item ai-only" style="display: none;">
                             <label for="ai_model">AIモデル:</label>
                             <select id="ai_model" name="ai_model">
-                                <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku (超高速・低コスト)</option>
-                                <option value="claude-3-5-sonnet-20241022" selected>Claude 3.5 Sonnet (推奨・高性能)</option>
-                                <option value="claude-3-opus-20240229">Claude 3 Opus (最高性能・高コスト)</option>
-                                <option value="claude-3-sonnet-20240229">Claude 3 Sonnet (旧版)</option>
-                                <option value="claude-3-haiku-20240307">Claude 3 Haiku (旧版)</option>
-                            </select>
+{{MODEL_OPTIONS}}                            </select>
                         </div>
                     </div>
                 </div>
@@ -1039,7 +1125,7 @@ def _export_matches_to_csv(matches, enhanced_mappings, headers_a, headers_b):
     
     return output_file
 
-def _claude_field_mapping_analysis(headers_a, headers_b, sample_data_a, sample_data_b, model_name='claude-3-5-sonnet-20241022'):
+def _claude_field_mapping_analysis(headers_a, headers_b, sample_data_a, sample_data_b, model_name='claude-sonnet-4-20250514'):
     """Claude APIを使ってフィールドマッピングを分析"""
     try:
         # Claude API設定
@@ -1182,7 +1268,7 @@ B社のCSV:
             current_app.logger.error(f"     エラーレスポンス: {response.text}")
             
             # 高コストモデルで過負荷の場合、軽量モデルでリトライ
-            if response.status_code == 529 and model_name in ['claude-3-5-sonnet-20241022', 'claude-3-opus-20240229']:
+            if response.status_code == 529 and model_name in ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229']:
                 current_app.logger.info("   - 軽量モデル(Haiku)でフォールバック試行...")
                 return _claude_field_mapping_analysis(headers_a, headers_b, sample_data_a, sample_data_b, 'claude-3-5-haiku-20241022')
             
