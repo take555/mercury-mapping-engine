@@ -65,7 +65,7 @@ class DevelopmentConfig(BaseConfig):
     LOG_LEVEL = 'DEBUG'
     
     # 開発用のより小さい制限
-    CSV_MAX_ROWS = 100
+    CSV_MAX_ROWS = 999999  # 実質無制限
     CLAUDE_MAX_TOKENS = 1000
     
     @staticmethod

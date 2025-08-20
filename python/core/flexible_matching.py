@@ -454,11 +454,12 @@ def flexible_enhanced_matching(data_a: List[Dict], data_b: List[Dict],
     柔軟な拡張マッチング - enhanced.pyとの互換性を保持
     """
     
-    # サンプルサイズでデータを制限
-    if len(data_a) > max_sample_size:
-        data_a = data_a[:max_sample_size]
-    if len(data_b) > max_sample_size:
-        data_b = data_b[:max_sample_size]
+    # サンプルサイズでデータを制限（無制限の場合はスキップ）
+    if max_sample_size and max_sample_size > 0:
+        if len(data_a) > max_sample_size:
+            data_a = data_a[:max_sample_size]
+        if len(data_b) > max_sample_size:
+            data_b = data_b[:max_sample_size]
     
     matcher = FlexibleMatcher(similarity_threshold=0.7)  # 少し閾値を下げる
     

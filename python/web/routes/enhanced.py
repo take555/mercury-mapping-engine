@@ -49,7 +49,7 @@ def _handle_enhanced_analysis_post():
 
         # フォームデータ取得
         similarity_mode = request.form.get('similarity_mode', 'library')
-        max_sample_size = int(request.form.get('max_sample_size', 100))
+        max_sample_size = int(request.form.get('max_sample_size', 0))  # 0 = 無制限
         full_analysis = request.form.get('full_analysis') == 'on'
         # デフォルトモデルを動的に取得（最初のモデル）
         available_models = _get_available_claude_models()
@@ -683,7 +683,8 @@ def _get_html_template():
                         <div class="setting-item">
                             <label for="sample_size">同一カードデータ取得数:</label>
                             <select id="sample_size" name="max_sample_size">
-                                <option value="100" selected>100件 (高速)</option>
+                                <option value="0" selected>無制限 (全データ処理)</option>
+                                <option value="100">100件 (高速)</option>
                                 <option value="200">200件</option>
                                 <option value="300">300件</option>
                                 <option value="400">400件</option>
@@ -1405,11 +1406,12 @@ def _match_cards_with_claude_mappings(data_a, data_b, claude_mappings, max_sampl
     import time
     start_time = time.time()
     
-    # データサイズ制限
-    if len(data_a) > max_sample_size:
-        data_a = data_a[:max_sample_size]
-    if len(data_b) > max_sample_size:
-        data_b = data_b[:max_sample_size]
+    # データサイズ制限（無制限の場合はスキップ）
+    if max_sample_size and max_sample_size > 0:
+        if len(data_a) > max_sample_size:
+            data_a = data_a[:max_sample_size]
+        if len(data_b) > max_sample_size:
+            data_b = data_b[:max_sample_size]
     
     analysis_logger.logger.info(f"🔍 Claudeマッピングベースカード特定開始: {len(data_a)}×{len(data_b)}行")
     
