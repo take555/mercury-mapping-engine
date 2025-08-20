@@ -7,6 +7,7 @@ import os
 import time
 import traceback
 from core import create_mapping_engine
+from core.two_stage_matching import enhanced_two_stage_matching
 from config.settings import Config
 from utils.logger import analysis_logger, performance_logger
 
@@ -114,98 +115,36 @@ def _handle_enhanced_analysis_post():
         analysis_logger.logger.info(f"   - A社ヘッダー: {analysis_a['headers'][:5]}...")
         analysis_logger.logger.info(f"   - B社ヘッダー: {analysis_b['headers'][:5]}...")
 
-        # 🔥 Brute Force Matching実行（詳細ログ付き）
-        analysis_logger.logger.info("💪 Step 4: Brute Force Matching開始")
+        # 🚀 2段階マッチングシステム実行（高速化版）
+        analysis_logger.logger.info("🚀 Step 4: 2段階マッチングシステム開始")
         start_time = time.time()
 
         try:
-            card_matcher = engine.card_matcher
-
             data_a = analysis_a.get('full_data', analysis_a['sample_data'])
             data_b = analysis_b.get('full_data', analysis_b['sample_data'])
 
             analysis_logger.logger.info(f"📊 マッチング対象データ:")
             analysis_logger.logger.info(f"   - A社データ: {len(data_a)}行")
             analysis_logger.logger.info(f"   - B社データ: {len(data_b)}行")
-            analysis_logger.logger.info(
-                f"   - 予想比較回数: {len(data_a)} × {len(data_b)} = {len(data_a) * len(data_b)}")
+            analysis_logger.logger.info(f"   - 新手法: 重要フィールドのみで同一カード特定 → フィールドマッピング学習")
 
-            matches = card_matcher.brute_force_matching(
+            # 2段階マッチング実行
+            matches, enhanced_mappings = enhanced_two_stage_matching(
                 data_a,
                 data_b,
                 analysis_a['headers'],
                 analysis_b['headers'],
-                max_sample_size=max_sample_size,
-                similarity_mode=similarity_mode,
-                ai_manager=ai_manager
+                max_sample_size=max_sample_size
             )
 
             matching_time = time.time() - start_time
-            analysis_logger.logger.info(f"✅ Brute Force Matching完了 ({matching_time:.2f}秒)")
-            analysis_logger.logger.info(f"🎯 マッチング結果: {len(matches)}件")
+            analysis_logger.logger.info(f"✅ 2段階マッチング完了 ({matching_time:.2f}秒)")
+            analysis_logger.logger.info(f"🎯 結果: {len(matches)}件の同一カード, {len(enhanced_mappings)}件のフィールドマッピング")
 
-            # フィールドマッピング分析（詳細ログ付き）
-            analysis_logger.logger.info("🔗 Step 5: フィールドマッピング分析開始")
-            start_time = time.time()
-
-            if matches:
-                try:
-                    analysis_logger.logger.info(f"   - 入力マッチ数: {len(matches)}")
-
-                    field_mapping_result = engine.field_mapper.analyze_field_mappings_from_matches(
-                        matches, analysis_a['headers'], analysis_b['headers']
-                    )
-
-                    analysis_logger.logger.info(f"   - マッピング結果タイプ: {type(field_mapping_result)}")
-
-                    # 返り値の型に応じて適切に処理（詳細ログ付き）
-                    if isinstance(field_mapping_result, tuple):
-                        enhanced_mappings = field_mapping_result[0] if field_mapping_result else []
-                        analysis_logger.logger.info(
-                            f"   - Tuple形式: 要素数={len(field_mapping_result)}, 第1要素={len(enhanced_mappings)}件")
-                    elif isinstance(field_mapping_result, dict):
-                        analysis_logger.logger.info(f"   - Dict形式: キー={list(field_mapping_result.keys())[:5]}")
-
-                        if 'mappings' in field_mapping_result:
-                            enhanced_mappings = field_mapping_result['mappings']
-                            analysis_logger.logger.info(f"   - 'mappings'キーから取得: {len(enhanced_mappings)}件")
-                        elif 'enhanced_mappings' in field_mapping_result:
-                            enhanced_mappings = field_mapping_result['enhanced_mappings']
-                            analysis_logger.logger.info(
-                                f"   - 'enhanced_mappings'キーから取得: {len(enhanced_mappings)}件")
-                        else:
-                            # dictをリストに変換
-                            enhanced_mappings = [
-                                {
-                                    'field_a': k.split('→')[0] if '→' in k else k,
-                                    'field_b': k.split('→')[1] if '→' in k else 'unknown',
-                                    'confidence': v.get('confidence', v.get('avg_similarity', 0.0)) if isinstance(v,
-                                                                                                                  dict) else 0.0,
-                                    'sample_count': v.get('count', v.get('sample_count', 1)) if isinstance(v,
-                                                                                                           dict) else 1,
-                                    'field_type': v.get('field_type', 'unknown') if isinstance(v, dict) else 'unknown'
-                                }
-                                for k, v in field_mapping_result.items()
-                            ]
-                            analysis_logger.logger.info(f"   - Dict変換: {len(enhanced_mappings)}件のマッピング")
-                    elif isinstance(field_mapping_result, list):
-                        enhanced_mappings = field_mapping_result
-                        analysis_logger.logger.info(f"   - List形式: {len(enhanced_mappings)}件")
-                    else:
-                        analysis_logger.logger.warning(f"   - 未知の形式: {type(field_mapping_result)}")
-                        enhanced_mappings = []
-
-                except Exception as e:
-                    analysis_logger.logger.error(f"❌ フィールドマッピング分析エラー: {e}")
-                    analysis_logger.logger.error(f"   - エラー詳細: {traceback.format_exc()}")
-                    enhanced_mappings = []
-
-            else:
-                enhanced_mappings = []
-                analysis_logger.logger.info("   - マッチなし: フィールドマッピングスキップ")
-
-            mapping_time = time.time() - start_time
-            analysis_logger.logger.info(f"✅ フィールドマッピング分析完了 ({mapping_time:.2f}秒)")
+            # フィールドマッピングは2段階マッチングで既に完了
+            analysis_logger.logger.info("✅ Step 5: フィールドマッピング分析は2段階マッチングで完了済み")
+            analysis_logger.logger.info(f"   - 高信頼度マッピング: {len([m for m in enhanced_mappings if m.get('confidence', 0) > 0.8])}件")
+            analysis_logger.logger.info(f"   - 中信頼度マッピング: {len([m for m in enhanced_mappings if 0.5 <= m.get('confidence', 0) <= 0.8])}件")
 
             card_analysis_success = True
 
