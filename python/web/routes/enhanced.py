@@ -198,7 +198,7 @@ def _handle_enhanced_analysis_post():
 
             # CSV出力機能を追加
             try:
-                _export_matches_to_csv(matches, enhanced_mappings, analysis_a['headers'], analysis_b['headers'])
+                _export_matches_to_csv(matches, enhanced_mappings, analysis_a['headers'], analysis_b['headers'], data_a, data_b)
                 analysis_logger.logger.info("✅ マッチングデータをresults/test.csvに出力しました")
             except Exception as e:
                 analysis_logger.logger.error(f"❌ CSV出力エラー: {e}")
@@ -1083,14 +1083,38 @@ def _is_serial_field(field_name: str, data_sample: List[Dict] = None) -> bool:
     return False
 
 
-def _export_matches_to_csv(matches, enhanced_mappings, headers_a, headers_b):
-    """マッチングデータをCSVファイルに出力（A社データ + 区切り + B社データ形式）"""
+def _export_matches_to_csv(matches, enhanced_mappings, headers_a, headers_b, data_a=None, data_b=None):
+    """マッチングデータをCSVファイルに出力（データ数が多い方を基準に全レコード出力）"""
     
     # 出力ディレクトリを作成
     output_dir = '/app/results'
     os.makedirs(output_dir, exist_ok=True)
     
     output_file = os.path.join(output_dir, 'test.csv')
+    
+    # データ数を確認して、多い方を基準にする
+    len_a = len(data_a) if data_a else 0
+    len_b = len(data_b) if data_b else 0
+    use_a_as_base = len_a >= len_b
+    
+    # マッチ情報を辞書化（高速検索用）
+    match_dict_a_to_b = {}  # A社カードID -> B社カード
+    match_dict_b_to_a = {}  # B社カードID -> A社カード
+    match_scores = {}  # ペアのマッチスコア
+    
+    for match in matches:
+        card_a = match.get('card_a', {})
+        card_b = match.get('card_b', {})
+        similarity = match.get('overall_similarity', 0.0)
+        
+        # ユニークキーを生成（最初の非空フィールドの値を使用）
+        key_a = _get_record_key(card_a, headers_a)
+        key_b = _get_record_key(card_b, headers_b)
+        
+        if key_a and key_b:
+            match_dict_a_to_b[key_a] = card_b
+            match_dict_b_to_a[key_b] = card_a
+            match_scores[(key_a, key_b)] = similarity
     
     # CSVヘッダーを構築：A社全フィールド + 区切り + B社全フィールド + マッチスコア
     csv_headers = []
@@ -1116,33 +1140,104 @@ def _export_matches_to_csv(matches, enhanced_mappings, headers_a, headers_b):
         # ヘッダー行を書き込み
         writer.writerow(csv_headers)
         
-        # データ行を書き込み
-        for match in matches:
-            card_a = match.get('card_a', {})
-            card_b = match.get('card_b', {})
-            similarity = match.get('overall_similarity', 0.0)
-            
-            row = []
-            
-            # A社全フィールドのデータを追加
-            for header in headers_a:
-                value_a = str(card_a.get(header, '')).strip() or 'N/A'
-                row.append(value_a)
-            
-            # 区切り文字列を追加
-            row.append("____####____")
-            
-            # B社全フィールドのデータを追加
-            for header in headers_b:
-                value_b = str(card_b.get(header, '')).strip() or 'N/A'
-                row.append(value_b)
-            
-            # マッチスコアを追加
-            row.append(f"{similarity:.3f}")
-            
-            writer.writerow(row)
+        # データ数が多い方を基準にして全レコードを出力
+        if use_a_as_base and data_a:
+            # A社データを基準
+            for record_a in data_a:
+                row = []
+                key_a = _get_record_key(record_a, headers_a)
+                
+                # A社全フィールドのデータを追加
+                for header in headers_a:
+                    value_a = str(record_a.get(header, '')).strip() or 'N/A'
+                    row.append(value_a)
+                
+                # 区切り文字列を追加
+                row.append("____####____")
+                
+                # マッチするB社データがあるか確認
+                if key_a in match_dict_a_to_b:
+                    card_b = match_dict_a_to_b[key_a]
+                    key_b = _get_record_key(card_b, headers_b)
+                    
+                    # B社全フィールドのデータを追加
+                    for header in headers_b:
+                        value_b = str(card_b.get(header, '')).strip() or 'N/A'
+                        row.append(value_b)
+                    
+                    # マッチスコアを追加
+                    score = match_scores.get((key_a, key_b), 0.0)
+                    row.append(f"{score:.3f}")
+                else:
+                    # マッチなし - B社フィールドは空
+                    for header in headers_b:
+                        row.append('')
+                    row.append('0.000')  # マッチスコア0
+                
+                writer.writerow(row)
+                
+        elif data_b:
+            # B社データを基準
+            for record_b in data_b:
+                row = []
+                key_b = _get_record_key(record_b, headers_b)
+                
+                # マッチするA社データがあるか確認
+                if key_b in match_dict_b_to_a:
+                    card_a = match_dict_b_to_a[key_b]
+                    key_a = _get_record_key(card_a, headers_a)
+                    
+                    # A社全フィールドのデータを追加
+                    for header in headers_a:
+                        value_a = str(card_a.get(header, '')).strip() or 'N/A'
+                        row.append(value_a)
+                else:
+                    # マッチなし - A社フィールドは空
+                    for header in headers_a:
+                        row.append('')
+                
+                # 区切り文字列を追加
+                row.append("____####____")
+                
+                # B社全フィールドのデータを追加
+                for header in headers_b:
+                    value_b = str(record_b.get(header, '')).strip() or 'N/A'
+                    row.append(value_b)
+                
+                # マッチスコアを追加
+                if key_b in match_dict_b_to_a:
+                    key_a = _get_record_key(match_dict_b_to_a[key_b], headers_a)
+                    score = match_scores.get((key_a, key_b), 0.0)
+                    row.append(f"{score:.3f}")
+                else:
+                    row.append('0.000')
+                
+                writer.writerow(row)
+    
+    # ログ出力
+    analysis_logger.logger.info(f"📊 CSV出力完了:")
+    analysis_logger.logger.info(f"   - 基準データ: {'A社' if use_a_as_base else 'B社'} ({len_a if use_a_as_base else len_b}件)")
+    analysis_logger.logger.info(f"   - マッチ件数: {len(matches)}件")
+    analysis_logger.logger.info(f"   - アンマッチ件数: {(len_a if use_a_as_base else len_b) - len(matches)}件")
     
     return output_file
+
+
+def _get_record_key(record, headers):
+    """レコードのユニークキーを生成（複数フィールドの組み合わせ）"""
+    if not record:
+        return None
+    
+    # 最初の3つの非空フィールドを結合してキーとする
+    key_parts = []
+    for header in headers[:10]:  # 最初の10フィールドから探す
+        value = str(record.get(header, '')).strip()
+        if value and value != 'N/A':
+            key_parts.append(value)
+            if len(key_parts) >= 3:
+                break
+    
+    return '|||'.join(key_parts) if key_parts else None
 
 def _claude_field_mapping_analysis(headers_a, headers_b, sample_data_a, sample_data_b, model_name='claude-sonnet-4-20250514'):
     """Claude APIを使ってフィールドマッピングを分析"""
