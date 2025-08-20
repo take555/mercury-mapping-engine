@@ -3,11 +3,12 @@ Mercury Mapping Engine - Enhanced Analysis Web Routes
 高精度分析Webページルート
 """
 from flask import Blueprint, request, current_app
+from typing import List, Dict
 import os
 import time
 import traceback
 from core import create_mapping_engine
-from core.two_stage_matching import enhanced_two_stage_matching
+from core.flexible_matching import flexible_enhanced_matching
 from config.settings import Config
 from utils.logger import analysis_logger, performance_logger
 
@@ -126,10 +127,10 @@ def _handle_enhanced_analysis_post():
             analysis_logger.logger.info(f"📊 マッチング対象データ:")
             analysis_logger.logger.info(f"   - A社データ: {len(data_a)}行")
             analysis_logger.logger.info(f"   - B社データ: {len(data_b)}行")
-            analysis_logger.logger.info(f"   - 新手法: 重要フィールドのみで同一カード特定 → フィールドマッピング学習")
+            analysis_logger.logger.info(f"   - 新手法: AI/文字列類似度による柔軟なデータマッチング")
 
-            # 2段階マッチング実行
-            matches, enhanced_mappings = enhanced_two_stage_matching(
+            # 柔軟マッチング実行 (AI/文字列類似度ベース)
+            matches, enhanced_mappings = flexible_enhanced_matching(
                 data_a,
                 data_b,
                 analysis_a['headers'],
@@ -138,20 +139,23 @@ def _handle_enhanced_analysis_post():
             )
 
             matching_time = time.time() - start_time
-            analysis_logger.logger.info(f"✅ 2段階マッチング完了 ({matching_time:.2f}秒)")
-            analysis_logger.logger.info(f"🎯 結果: {len(matches)}件の同一カード, {len(enhanced_mappings)}件のフィールドマッピング")
+            analysis_logger.logger.info(f"✅ 柔軟マッチング完了 ({matching_time:.2f}秒)")
+            # enhanced_mappingsは辞書形式で返される
+            field_mappings = enhanced_mappings.get('flexible_field_mappings', [])
+            analysis_logger.logger.info(f"🎯 結果: {len(matches)}件の同一カード, {len(field_mappings)}件のフィールドマッピング")
 
-            # フィールドマッピングは2段階マッチングで既に完了
-            analysis_logger.logger.info("✅ Step 5: フィールドマッピング分析は2段階マッチングで完了済み")
-            analysis_logger.logger.info(f"   - 高信頼度マッピング: {len([m for m in enhanced_mappings if m.get('confidence', 0) > 0.8])}件")
-            analysis_logger.logger.info(f"   - 中信頼度マッピング: {len([m for m in enhanced_mappings if 0.5 <= m.get('confidence', 0) <= 0.8])}件")
+            # フィールドマッピングは柔軟マッチングで既に完了
+            analysis_logger.logger.info("✅ Step 5: フィールドマッピング分析は柔軟マッチングで完了済み")
+            analysis_logger.logger.info(f"   - 戦略: {enhanced_mappings.get('matching_strategy', 'unknown')}")
+            analysis_logger.logger.info(f"   - 類似度閾値: {enhanced_mappings.get('similarity_threshold', 0.0)}")
+            analysis_logger.logger.info(f"   - 総比較回数: {enhanced_mappings.get('total_comparisons', 0):,}回")
 
             card_analysis_success = True
 
         except Exception as e:
             analysis_logger.logger.error(f"❌ Brute Force分析エラー: {e}")
             analysis_logger.logger.error(f"   - エラー詳細: {traceback.format_exc()}")
-            enhanced_mappings = []
+            enhanced_mappings = {'flexible_field_mappings': [], 'matching_strategy': 'error', 'match_count': 0}
             matches = []
             card_analysis_success = False
             card_analysis_error = str(e)
@@ -160,13 +164,26 @@ def _handle_enhanced_analysis_post():
         analysis_logger.logger.info("📋 Step 6: マッピングサマリー作成開始")
         start_time = time.time()
 
-        if enhanced_mappings:
+        if enhanced_mappings and isinstance(enhanced_mappings, dict):
             try:
-                analysis_logger.logger.info(f"   - enhanced_mappings: {len(enhanced_mappings)}件")
+                field_mappings = enhanced_mappings.get('flexible_field_mappings', [])
+                analysis_logger.logger.info(f"   - enhanced_mappings: {len(field_mappings)}件")
                 analysis_logger.logger.info(f"   - matches: {len(matches)}件")
 
-                mapping_summary = engine.create_mapping_summary(enhanced_mappings, matches, analysis_a, analysis_b)
-                validation_result = engine.validate_mapping_results(enhanced_mappings, matches)
+                # 柔軟マッチングの結果をマッピングエンジンに渡すため形式変換
+                field_mappings = enhanced_mappings.get('flexible_field_mappings', [])
+                mapping_list = []
+                for field_a, field_b, score in field_mappings:
+                    mapping_list.append({
+                        'field_a': field_a,
+                        'field_b': field_b,
+                        'confidence': score,
+                        'field_type': 'flexible',
+                        'sample_count': 'auto'
+                    })
+                
+                mapping_summary = engine.create_mapping_summary(mapping_list, matches, analysis_a, analysis_b)
+                validation_result = engine.validate_mapping_results(mapping_list, matches)
 
                 analysis_logger.logger.info("✅ マッピングサマリー作成完了")
             except Exception as e:
@@ -490,12 +507,18 @@ def _build_enhanced_analysis_form() -> str:
                     <h3>🔧 詳細設定</h3>
                     <div class="settings-grid">
                         <div class="setting-item">
-                            <label for="sample_size">サンプルサイズ:</label>
+                            <label for="sample_size">同一カードデータ取得数:</label>
                             <select id="sample_size" name="max_sample_size">
-                                <option value="20">20行 (超高速テスト)</option>
-                                <option value="50">50行 (高速テスト)</option>
-                                <option value="100" selected>100行 (推奨)</option>
-                                <option value="200">200行 (詳細分析)</option>
+                                <option value="100" selected>100件 (高速)</option>
+                                <option value="200">200件</option>
+                                <option value="300">300件</option>
+                                <option value="400">400件</option>
+                                <option value="500">500件 (推奨)</option>
+                                <option value="600">600件</option>
+                                <option value="700">700件</option>
+                                <option value="800">800件</option>
+                                <option value="900">900件</option>
+                                <option value="1000">1000件 (最大)</option>
                             </select>
                         </div>
 
@@ -753,6 +776,7 @@ def _build_enhanced_analysis_html(analysis_a, analysis_b, enhanced_mappings, car
             .confidence-high {{ color: #4caf50; font-weight: bold; }}
             .confidence-medium {{ color: #ff9800; font-weight: bold; }}
             .confidence-low {{ color: #f44336; font-weight: bold; }}
+            .row-number {{ color: #666; font-size: 0.8em; background: #f0f0f0; padding: 2px 6px; border-radius: 3px; }}
             .nav-links {{ margin: 20px 0; }}
             .nav-links a {{ margin-right: 15px; padding: 8px 16px; background: #2196f3; color: white; text-decoration: none; border-radius: 4px; }}
         </style>
@@ -814,6 +838,73 @@ def _build_enhanced_analysis_html(analysis_a, analysis_b, enhanced_mappings, car
     return html
 
 
+def _is_rarity_field(field_name: str, data_sample: List[Dict] = None) -> bool:
+    """AIベースでレアリティフィールドかどうか判定"""
+    if not field_name:
+        return False
+    
+    # フィールド名パターン
+    name_lower = str(field_name).lower()
+    name_patterns = ['rarity', 'rare', 'レア', '希少', 'star', 'grade', 'rank', 'tier', '等級', 'グレード', 'ランク']
+    if any(pattern in name_lower for pattern in name_patterns):
+        return True
+    
+    # データパターン分析（サンプルがある場合）
+    if data_sample:
+        sample_values = []
+        for row in data_sample[:10]:
+            value = str(row.get(field_name, '')).strip()
+            if value and value != 'nan':
+                sample_values.append(value)
+        
+        if sample_values:
+            # レアリティ特有のパターン
+            rarity_patterns = ['SR', 'SSR', 'R', 'N', 'UR', 'レア', '★', '☆', 'rare', 'common', 'super']
+            for value in sample_values:
+                if any(pattern in value.upper() for pattern in rarity_patterns):
+                    return True
+            
+            # 短い文字列で統一されたパターン（レアリティの特徴）
+            if all(len(v) <= 5 for v in sample_values) and len(set(sample_values)) <= 10:
+                return any(pattern in name_lower for pattern in ['star', '星', 'level', 'grade'])
+    
+    return False
+
+
+def _is_serial_field(field_name: str, data_sample: List[Dict] = None) -> bool:
+    """AIベースでシリアルフィールドかどうか判定"""
+    if not field_name:
+        return False
+    
+    # フィールド名パターン
+    name_lower = str(field_name).lower()
+    name_patterns = ['serial', 'id', 'code', 'number', 'シリアル', '型番', '番号', 'sku', 'jan', '品番']
+    if any(pattern in name_lower for pattern in name_patterns):
+        # 名前系フィールドは除外
+        if not any(exclude in name_lower for exclude in ['name', '名前', 'title', 'カード名']):
+            return True
+    
+    # データパターン分析（サンプルがある場合）
+    if data_sample:
+        sample_values = []
+        for row in data_sample[:10]:
+            value = str(row.get(field_name, '')).strip()
+            if value and value != 'nan':
+                sample_values.append(value)
+        
+        if sample_values:
+            # 英数字の組み合わせが多い
+            alphanumeric_count = sum(1 for v in sample_values if any(c.isalnum() for c in v) and any(c.isdigit() for c in v))
+            if alphanumeric_count > len(sample_values) * 0.7:
+                return True
+            
+            # 統一されたフォーマット（PK001, D01001等）
+            if len(set(len(v) for v in sample_values)) <= 2:  # 長さが統一されている
+                return True
+    
+    return False
+
+
 def _build_success_analysis_section(enhanced_mappings, card_matches, mapping_summary, validation_result):
     """成功時の分析セクション生成（タプル対応）"""
 
@@ -822,7 +913,7 @@ def _build_success_analysis_section(enhanced_mappings, card_matches, mapping_sum
     <div class="success">
         <h3>✅ 分析成功</h3>
         <p><strong>マッチしたカード数:</strong> {len(card_matches)}件</p>
-        <p><strong>検出されたフィールドマッピング:</strong> {len(enhanced_mappings)}件</p>
+        <p><strong>検出されたフィールドマッピング:</strong> {len(enhanced_mappings.get('flexible_field_mappings', []))}件</p>
     </div>
     """
 
@@ -851,8 +942,150 @@ def _build_success_analysis_section(enhanced_mappings, card_matches, mapping_sum
         </div>
         """
 
-    # フィールドマッピング表示（タプル対応）
-    if enhanced_mappings:
+    # 同一カード対応テーブル
+    if card_matches:
+        html += f"""
+        <h3>🎯 同一カード対応表（{len(card_matches)}件）</h3>
+        <table>
+        <tr>
+            <th>No.</th>
+            <th>A社カードデータ (行数)</th>
+            <th>B社カードデータ (行数)</th>
+            <th>マッチスコア</th>
+        </tr>
+        """
+        
+        # フィールドマッピングから高信頼度のもののみを取得（表示用）
+        display_fields = []
+        rarity_fields = {'a': None, 'b': None}
+        serial_fields = {'a': None, 'b': None}
+        
+        # AIベース判定のためのサンプルデータを準備
+        sample_data_a = [match.get('card_a', {}) for match in card_matches[:10]]
+        sample_data_b = [match.get('card_b', {}) for match in card_matches[:10]]
+        
+        if enhanced_mappings and isinstance(enhanced_mappings, dict):
+            field_mappings = enhanced_mappings.get('flexible_field_mappings', [])
+            
+            # 名前、レアリティ、シリアル等の重要フィールドを優先的に取得
+            for mapping in field_mappings:
+                if isinstance(mapping, tuple) and len(mapping) >= 3:
+                    field_a, field_b, score = mapping[0], mapping[1], mapping[2]
+                    
+                    # AIベースでレアリティフィールドを特定
+                    if not rarity_fields['a'] and _is_rarity_field(field_a, sample_data_a):
+                        rarity_fields['a'] = field_a
+                        rarity_fields['b'] = field_b
+                    
+                    # AIベースでシリアルフィールドを特定
+                    elif not serial_fields['a'] and _is_serial_field(field_a, sample_data_a):
+                        serial_fields['a'] = field_a
+                        serial_fields['b'] = field_b
+                    
+                    # 高信頼度フィールドマッピング
+                    elif score > 0.7:
+                        display_fields.append((field_a, field_b))
+            
+            # 上位5つまでに制限
+            display_fields = display_fields[:5]
+        
+        # 同一カード表示（全件表示）
+        for idx, match in enumerate(card_matches, 1):
+            try:
+                card_a = match.get('card_a', {})
+                card_b = match.get('card_b', {})
+                card_a_row = match.get('card_a_row', '不明')
+                card_b_row = match.get('card_b_row', '不明')
+                similarity = match.get('overall_similarity', 0.0)
+                
+                # A社データの表示
+                a_data_items = []
+                
+                # レアリティ情報を追加
+                if rarity_fields['a']:
+                    rarity_value = str(card_a.get(rarity_fields['a'], '')).strip()
+                    if rarity_value and rarity_value != 'nan':
+                        a_data_items.append(f"<strong style='color:#ff9800;'>🌟レアリティ:</strong> <span style='background:#fff3e0;padding:2px 6px;border-radius:3px;'>{rarity_value}</span>")
+                
+                # シリアル情報を追加
+                if serial_fields['a']:
+                    serial_value = str(card_a.get(serial_fields['a'], '')).strip()
+                    if serial_value and serial_value != 'nan':
+                        a_data_items.append(f"<strong style='color:#2196f3;'>🏷️シリアル:</strong> <span style='background:#e3f2fd;padding:2px 6px;border-radius:3px;'>{serial_value}</span>")
+                
+                # その他の表示フィールド
+                for field_a, field_b in display_fields:
+                    value_a = str(card_a.get(field_a, '')).strip()
+                    if value_a and value_a != 'nan':
+                        a_data_items.append(f"<strong>{field_a}:</strong> {value_a}")
+                
+                # 表示フィールドがない場合は代表的なフィールドを使用
+                if not a_data_items:
+                    for key in ['name', 'カード名', 'serial', '型番', 'id', 'rarity', 'レアリティ']:
+                        if key in card_a and str(card_a[key]).strip() and str(card_a[key]) != 'nan':
+                            a_data_items.append(f"<strong>{key}:</strong> {card_a[key]}")
+                            if len(a_data_items) >= 3:  # 最大3つまで
+                                break
+                
+                a_display = "<br>".join(a_data_items) if a_data_items else "データなし"
+                a_display_with_row = f"<div><small class='row-number'>CSV行: {card_a_row}</small><br>{a_display}</div>"
+                
+                # B社データの表示
+                b_data_items = []
+                
+                # レアリティ情報を追加
+                if rarity_fields['b']:
+                    rarity_value = str(card_b.get(rarity_fields['b'], '')).strip()
+                    if rarity_value and rarity_value != 'nan':
+                        b_data_items.append(f"<strong style='color:#ff9800;'>🌟レアリティ:</strong> <span style='background:#fff3e0;padding:2px 6px;border-radius:3px;'>{rarity_value}</span>")
+                
+                # シリアル情報を追加
+                if serial_fields['b']:
+                    serial_value = str(card_b.get(serial_fields['b'], '')).strip()
+                    if serial_value and serial_value != 'nan':
+                        b_data_items.append(f"<strong style='color:#2196f3;'>🏷️シリアル:</strong> <span style='background:#e3f2fd;padding:2px 6px;border-radius:3px;'>{serial_value}</span>")
+                
+                # その他の表示フィールド
+                for field_a, field_b in display_fields:
+                    value_b = str(card_b.get(field_b, '')).strip()
+                    if value_b and value_b != 'nan':
+                        b_data_items.append(f"<strong>{field_b}:</strong> {value_b}")
+                
+                # 表示フィールドがない場合は代表的なフィールドを使用
+                if not b_data_items:
+                    for key in ['name', 'カード名', 'serial', '型番', 'id', 'rarity', 'レアリティ']:
+                        if key in card_b and str(card_b[key]).strip() and str(card_b[key]) != 'nan':
+                            b_data_items.append(f"<strong>{key}:</strong> {card_b[key]}")
+                            if len(b_data_items) >= 3:  # 最大3つまで
+                                break
+                
+                b_display = "<br>".join(b_data_items) if b_data_items else "データなし"
+                b_display_with_row = f"<div><small class='row-number'>CSV行: {card_b_row}</small><br>{b_display}</div>"
+                
+                # スコアに応じた色分け
+                score_class = "confidence-high" if similarity > 0.9 else "confidence-medium" if similarity > 0.7 else "confidence-low"
+                
+                html += f"""
+                <tr>
+                    <td>{idx}</td>
+                    <td style="max-width: 300px; word-wrap: break-word;">{a_display_with_row}</td>
+                    <td style="max-width: 300px; word-wrap: break-word;">{b_display_with_row}</td>
+                    <td class="{score_class}">{similarity:.3f}</td>
+                </tr>
+                """
+            except Exception as e:
+                html += f"""
+                <tr>
+                    <td>{idx}</td>
+                    <td colspan="3">データ表示エラー: {str(e)[:100]}</td>
+                </tr>
+                """
+        
+        html += "</table>"
+
+    # フィールドマッピング表示（柔軟マッチング対応）
+    if enhanced_mappings and isinstance(enhanced_mappings, dict):
+        field_mappings = enhanced_mappings.get('flexible_field_mappings', [])
         html += """
         <h3>🎯 検出されたフィールドマッピング</h3>
         <table>
@@ -866,21 +1099,21 @@ def _build_success_analysis_section(enhanced_mappings, card_matches, mapping_sum
         </tr>
         """
 
-        for mapping in enhanced_mappings[:15]:
+        for mapping in field_mappings[:15]:
             try:
-                # タプル形式の場合の安全な処理
+                # 柔軟マッチングのタプル形式: (field_a, field_b, similarity_score)
                 if isinstance(mapping, tuple):
-                    # タプルを辞書に変換
-                    if len(mapping) >= 2:
+                    if len(mapping) >= 3:
                         field_a = str(mapping[0]).replace('\ufeff', '').strip() if mapping[0] else 'unknown'
                         field_b = str(mapping[1]).replace('\ufeff', '').strip() if mapping[1] else 'unknown'
+                        confidence = float(mapping[2]) if mapping[2] else 0.0
                     else:
                         field_a = field_b = 'unknown'
+                        confidence = 0.0
 
-                    confidence = 0.0
-                    sample_count = 'N/A'
-                    field_type = 'tuple_data'
-                    quality_score = 'N/A'
+                    sample_count = 'Auto'
+                    field_type = 'flexible'
+                    quality_score = f'{confidence:.3f}'
 
                 elif isinstance(mapping, dict):
                     # 通常の辞書形式
