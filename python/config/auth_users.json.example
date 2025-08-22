@@ -1,0 +1,12 @@
+{
+  "admin": {
+    "password_hash": "pbkdf2:sha256:600000$REPLACE_WITH_ACTUAL_HASH$REPLACE",
+    "role": "admin",
+    "display_name": "管理者"
+  },
+  "demo": {
+    "password_hash": "pbkdf2:sha256:600000$REPLACE_WITH_ACTUAL_HASH$REPLACE",
+    "role": "viewer",
+    "display_name": "デモユーザー"
+  }
+}

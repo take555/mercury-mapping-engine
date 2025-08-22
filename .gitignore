@@ -157,3 +157,8 @@ temp_files/
 config/production.py
 config/local.py
 mysql-data/
+
+# 認証設定（機密情報）
+python/config/auth_users.json
+*.pem
+*.key
